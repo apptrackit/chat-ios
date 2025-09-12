@@ -7,6 +7,7 @@
 
 import Foundation
 import WebRTC
+import Combine
 
 enum ConnectionStatus: String, CaseIterable {
     case disconnected = "Disconnected"
@@ -33,6 +34,7 @@ class ChatManager: NSObject, ObservableObject {
     private var dataChannel: RTCDataChannel?
     private var peerConnectionFactory: RTCPeerConnectionFactory!
     private var clientId: String?
+    private var pendingIceCandidates: [RTCIceCandidate] = []
     
     private let signalingServerURL = "wss://chat.ballabotond.com"
     // For local testing, use: "ws://localhost:8080"
@@ -43,7 +45,9 @@ class ChatManager: NSObject, ObservableObject {
     }
     
     deinit {
-        disconnect()
+        Task { @MainActor in
+            disconnect()
+        }
     }
     
     // MARK: - Public Methods
@@ -52,13 +56,26 @@ class ChatManager: NSObject, ObservableObject {
         guard webSocket == nil else { return }
         
         guard let url = URL(string: signalingServerURL) else {
-            print("Invalid signaling server URL")
+            print("Invalid signaling server URL: \(signalingServerURL)")
             return
         }
         
+        print("Connecting to WebSocket: \(url.absoluteString)")
         connectionStatus = .connecting
-        webSocket = URLSession.shared.webSocketTask(with: url)
+        let urlSession = URLSession(configuration: .default)
+        webSocket = urlSession.webSocketTask(with: url)
         webSocket?.resume()
+        
+        // Send a ping to test connection
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            self.webSocket?.sendPing { error in
+                if let error = error {
+                    print("WebSocket ping failed: \(error)")
+                } else {
+                    print("WebSocket ping successful")
+                }
+            }
+        }
         
         receiveMessages()
     }
@@ -74,6 +91,7 @@ class ChatManager: NSObject, ObservableObject {
         isP2PConnected = false
         roomId = ""
         clientId = nil
+        pendingIceCandidates.removeAll()
     }
     
     func joinRoom(roomId: String) {
@@ -83,16 +101,28 @@ class ChatManager: NSObject, ObservableObject {
     
     func sendMessage(_ text: String) {
         guard isP2PConnected, let dataChannel = dataChannel else {
-            print("Cannot send message: P2P connection not ready")
+            print("❌ Cannot send message: P2P connection not ready. isP2PConnected: \(isP2PConnected), dataChannel: \(dataChannel != nil)")
             return
         }
         
+        guard dataChannel.readyState == .open else {
+            print("❌ Cannot send message: Data channel not open. State: \(dataChannel.readyState.rawValue)")
+            return
+        }
+        
+        print("📤 Sending message: '\(text)'")
         let message = ChatMessage(text: text, timestamp: Date(), isFromSelf: true)
         messages.append(message)
         
         // Send via WebRTC data channel
-        let buffer = RTCDataBuffer(data: text.data(using: .utf8)!, isBinary: false)
-        dataChannel.sendData(buffer)
+        guard let data = text.data(using: .utf8) else {
+            print("❌ Failed to encode message as UTF-8")
+            return
+        }
+        
+        let buffer = RTCDataBuffer(data: data, isBinary: false)
+        let success = dataChannel.sendData(buffer)
+        print("📤 Message send result: \(success)")
     }
     
     // MARK: - Private Methods
@@ -109,12 +139,18 @@ class ChatManager: NSObject, ObservableObject {
         )
     }
     
-    private func createPeerConnection() {
+    private func createPeerConnection(isInitiator: Bool = false) {
+        print("📡 Creating peer connection... (isInitiator: \(isInitiator))")
+        
         let configuration = RTCConfiguration()
         configuration.iceServers = [
             RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
-            RTCIceServer(urlStrings: ["stun:stun1.l.google.com:19302"])
+            RTCIceServer(urlStrings: ["stun:stun1.l.google.com:19302"]),
+            RTCIceServer(urlStrings: ["stun:stun2.l.google.com:19302"])
         ]
+        configuration.iceCandidatePoolSize = 10
+        configuration.bundlePolicy = .maxBundle
+        configuration.rtcpMuxPolicy = .require
         
         let constraints = RTCMediaConstraints(
             mandatoryConstraints: nil,
@@ -127,18 +163,39 @@ class ChatManager: NSObject, ObservableObject {
             delegate: self
         )
         
-        createDataChannel()
+        if peerConnection != nil {
+            print("✅ Peer connection created successfully")
+            // Only the initiator creates the data channel
+            // The receiver will get it via didOpen delegate method
+            if isInitiator {
+                createDataChannel()
+            } else {
+                print("⏳ Waiting for data channel from initiator...")
+            }
+        } else {
+            print("❌ Failed to create peer connection")
+        }
     }
     
     private func createDataChannel() {
+        print("📡 Creating data channel...")
+        
         let dataChannelConfig = RTCDataChannelConfiguration()
         dataChannelConfig.isOrdered = true
+        dataChannelConfig.maxRetransmits = -1
+        dataChannelConfig.maxPacketLifeTime = -1
         
         dataChannel = peerConnection?.dataChannel(
             forLabel: "chat",
             configuration: dataChannelConfig
         )
         dataChannel?.delegate = self
+        
+        if dataChannel != nil {
+            print("✅ Data channel created successfully (for sending)")
+        } else {
+            print("❌ Failed to create data channel")
+        }
     }
     
     private func createOffer() {
@@ -181,6 +238,17 @@ class ChatManager: NSObject, ObservableObject {
                 return
             }
             
+            print("✅ Remote description set successfully")
+            
+            // Add any pending ICE candidates now that we have remote description
+            Task { @MainActor in
+                print("🗂️ Adding \(self.pendingIceCandidates.count) pending ICE candidates")
+                for candidate in self.pendingIceCandidates {
+                    self.addIceCandidate(candidate)
+                }
+                self.pendingIceCandidates.removeAll()
+            }
+            
             let constraints = RTCMediaConstraints(
                 mandatoryConstraints: [
                     "OfferToReceiveAudio": "false",
@@ -200,6 +268,8 @@ class ChatManager: NSObject, ObservableObject {
                         print("Failed to set local description: \(error.localizedDescription)")
                         return
                     }
+                    
+                    print("✅ Local description (answer) set successfully")
                     
                     // Send answer to signaling server
                     Task { @MainActor in
@@ -268,8 +338,17 @@ class ChatManager: NSObject, ObservableObject {
                 
             case .failure(let error):
                 print("WebSocket receive error: \(error.localizedDescription)")
+                print("Error code: \((error as NSError).code)")
+                print("Error domain: \((error as NSError).domain)")
                 Task { @MainActor in
                     self.connectionStatus = .disconnected
+                    // Try to reconnect after a delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                        if self.connectionStatus == .disconnected {
+                            print("Attempting to reconnect...")
+                            self.connect()
+                        }
+                    }
                 }
             }
         }
@@ -290,20 +369,29 @@ class ChatManager: NSObject, ObservableObject {
                 self.clientId = json["clientId"] as? String
                 print("Connected to signaling server with ID: \(self.clientId ?? "unknown")")
                 
-            case "joined_room":
+            case "room_joined":
                 if let roomId = json["roomId"] as? String {
                     self.roomId = roomId
                     print("Joined room: \(roomId)")
                 }
                 
             case "room_ready":
-                print("Room is ready, creating peer connection")
-                self.createPeerConnection()
-                // Check if we're the initiator to create offer
-                if let isInitiator = json["isInitiator"] as? Bool, isInitiator {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                print("🎯 Room is ready! Both users connected")
+                
+                // Use client ID to determine who creates the offer (avoid collision)
+                let shouldCreateOffer = json["isInitiator"] as? Bool ?? false
+                print("Should create offer: \(shouldCreateOffer), Client ID: \(self.clientId ?? "unknown")")
+                
+                self.createPeerConnection(isInitiator: shouldCreateOffer)
+                
+                if shouldCreateOffer {
+                    // Wait a moment for peer connection to be fully set up
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        print("🚀 Creating offer as initiator")
                         self.createOffer()
                     }
+                } else {
+                    print("⏳ Waiting for offer from initiator...")
                 }
                 
             case "webrtc_offer":
@@ -333,58 +421,101 @@ class ChatManager: NSObject, ObservableObject {
     }
     
     private func handleOffer(_ json: [String: Any]) {
-        guard let sdp = json["sdp"] as? String,
-              let typeString = json["type"] as? String else {
-            print("Invalid offer format")
+        print("📥 Received WebRTC offer")
+        guard let sdp = json["sdp"] as? String else {
+            print("Invalid offer format - missing SDP")
             return
         }
         
+        print("Offer SDP length: \(sdp.count)")
         let sessionDescription = RTCSessionDescription(
-            type: RTCSdpType(rawValue: typeString) ?? .offer,
+            type: .offer,
             sdp: sdp
         )
         
-        createPeerConnection()
+        // Create peer connection if we don't have one
+        if peerConnection == nil {
+            createPeerConnection(isInitiator: false) // Receiver doesn't create data channel
+        }
+        
+        // Check if we have a collision (both sides created offers)
+        if peerConnection?.signalingState == .haveLocalOffer {
+            print("⚠️ Offer collision detected! Resolving...")
+            // Standard WebRTC collision resolution: compare client IDs
+            let remoteClientId = json["from"] as? String ?? ""
+            let localClientId = self.clientId ?? ""
+            
+            if localClientId.compare(remoteClientId) == .orderedDescending {
+                // We win the collision, ignore the remote offer
+                print("🏆 We win collision, ignoring remote offer")
+                return
+            } else {
+                // They win, restart as answerer
+                print("👥 They win collision, restarting as answerer")
+                peerConnection?.close()
+                createPeerConnection(isInitiator: false)
+            }
+        }
+        
         createAnswer(for: sessionDescription)
     }
     
     private func handleAnswer(_ json: [String: Any]) {
-        guard let sdp = json["sdp"] as? String,
-              let typeString = json["type"] as? String else {
-            print("Invalid answer format")
+        print("Received WebRTC answer")
+        guard let sdp = json["sdp"] as? String else {
+            print("Invalid answer format - missing SDP")
             return
         }
         
+        print("Answer SDP length: \(sdp.count)")
         let sessionDescription = RTCSessionDescription(
-            type: RTCSdpType(rawValue: typeString) ?? .answer,
+            type: .answer,
             sdp: sdp
         )
         
-        peerConnection?.setRemoteDescription(sessionDescription) { error in
+        peerConnection?.setRemoteDescription(sessionDescription) { [weak self] error in
             if let error = error {
-                print("Failed to set remote description: \(error.localizedDescription)")
+                print("Failed to set remote description (answer): \(error.localizedDescription)")
             } else {
-                print("Successfully set remote description")
+                print("✅ Remote description (answer) set successfully")
+                
+                // Add any pending ICE candidates now that we have remote description
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    print("🗂️ Adding \(self.pendingIceCandidates.count) pending ICE candidates")
+                    for candidate in self.pendingIceCandidates {
+                        self.addIceCandidate(candidate)
+                    }
+                    self.pendingIceCandidates.removeAll()
+                }
             }
         }
     }
     
     private func handleIceCandidate(_ json: [String: Any]) {
+        print("📥 Received ICE candidate")
         guard let candidateDict = json["candidate"] as? [String: Any],
               let candidate = candidateDict["candidate"] as? String,
               let sdpMLineIndex = candidateDict["sdpMLineIndex"] as? Int32,
               let sdpMid = candidateDict["sdpMid"] as? String else {
-            print("Invalid ICE candidate format")
+            print("Invalid ICE candidate format: \(json)")
             return
         }
         
+        print("ICE candidate: \(candidate)")
         let iceCandidate = RTCIceCandidate(
             sdp: candidate,
             sdpMLineIndex: sdpMLineIndex,
             sdpMid: sdpMid
         )
         
-        addIceCandidate(iceCandidate)
+        // If we don't have a remote description yet, store the candidate
+        if peerConnection?.remoteDescription == nil {
+            print("🗂️ Storing ICE candidate for later (no remote description yet)")
+            pendingIceCandidates.append(iceCandidate)
+        } else {
+            addIceCandidate(iceCandidate)
+        }
     }
 }
 
@@ -408,16 +539,33 @@ extension ChatManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        print("ICE connection state changed: \(newState.rawValue)")
+        print("🔵 ICE connection state changed: \(newState.rawValue)")
         
         Task { @MainActor in
             switch newState {
-            case .connected, .completed:
+            case .new:
+                print("ICE: New connection")
+            case .checking:
+                print("ICE: Checking connectivity")
+            case .connected:
+                print("🟢 ICE: Connected! P2P connection established")
                 self.isP2PConnected = true
-            case .disconnected, .failed, .closed:
+            case .completed:
+                print("🟢 ICE: Completed! P2P connection fully established")
+                self.isP2PConnected = true
+            case .failed:
+                print("🔴 ICE: Connection failed")
                 self.isP2PConnected = false
-            default:
+            case .disconnected:
+                print("🟡 ICE: Disconnected")
+                self.isP2PConnected = false
+            case .closed:
+                print("🔴 ICE: Connection closed")
+                self.isP2PConnected = false
+            case .count:
                 break
+            @unknown default:
+                print("ICE: Unknown state")
             }
         }
     }
@@ -427,7 +575,7 @@ extension ChatManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        print("Generated ICE candidate")
+        print("📤 Generated ICE candidate: \(candidate.sdp)")
         
         Task { @MainActor in
             self.sendSignalingMessage(type: "ice_candidate", payload: [
@@ -445,11 +593,16 @@ extension ChatManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        print("Data channel opened: \(dataChannel.label)")
+        print("📡 Data channel opened by peer: \(dataChannel.label)")
+        
+        // This is called when the REMOTE peer opens a data channel
+        // We need to set this as our data channel for receiving messages
+        self.dataChannel = dataChannel
         dataChannel.delegate = self
         
         Task { @MainActor in
             self.isP2PConnected = true
+            print("✅ P2P connection fully established with data channel: \(dataChannel.label)")
         }
     }
 }
@@ -458,32 +611,42 @@ extension ChatManager: RTCPeerConnectionDelegate {
 
 extension ChatManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
-        print("Data channel state changed: \(dataChannel.readyState.rawValue)")
+        print("📡 Data channel state changed: \(dataChannel.readyState.rawValue)")
         
         Task { @MainActor in
             switch dataChannel.readyState {
+            case .connecting:
+                print("📡 Data channel: Connecting...")
             case .open:
+                print("🟢 Data channel: Open! Ready to send messages")
                 self.isP2PConnected = true
+            case .closing:
+                print("📡 Data channel: Closing...")
             case .closed:
+                print("🔴 Data channel: Closed")
                 self.isP2PConnected = false
-            default:
-                break
+            @unknown default:
+                print("📡 Data channel: Unknown state")
             }
         }
     }
     
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        guard let data = buffer.data,
-              let message = String(data: data, encoding: .utf8) else {
-            print("Failed to decode received message")
+        let data = buffer.data
+        print("📥 Received raw data: \(data.count) bytes")
+        
+        guard let message = String(data: data, encoding: .utf8) else {
+            print("❌ Failed to decode received message from \(data.count) bytes")
+            print("Raw data: \(data)")
             return
         }
         
-        print("Received P2P message: \(message)")
+        print("📥 Received P2P message: '\(message)'")
         
         Task { @MainActor in
             let chatMessage = ChatMessage(text: message, timestamp: Date(), isFromSelf: false)
             self.messages.append(chatMessage)
+            print("✅ Message added to chat: '\(message)'")
         }
     }
 }
