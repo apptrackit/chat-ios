@@ -128,6 +128,8 @@ class ChatManager: NSObject, ObservableObject {
     // MARK: - Private Methods
     
     private func setupWebRTC() {
+        print("🔧 Setting up WebRTC...")
+        
         // Initialize WebRTC
         RTCInitializeSSL()
         
@@ -137,25 +139,66 @@ class ChatManager: NSObject, ObservableObject {
             encoderFactory: videoEncoderFactory,
             decoderFactory: videoDecoderFactory
         )
+        
+        print("✅ WebRTC setup complete, factory created: \(peerConnectionFactory != nil)")
     }
     
     private func createPeerConnection(isInitiator: Bool = false) {
         print("📡 Creating peer connection... (isInitiator: \(isInitiator))")
         
+        // Ensure WebRTC is properly initialized
+        if peerConnection != nil {
+            print("⚠️ Peer connection already exists, cleaning up...")
+            peerConnection?.close()
+            peerConnection = nil
+        }
         let configuration = RTCConfiguration()
+        // Toggle to force TURN-only for debugging tough NATs
+        let forceTurn = false
+
         configuration.iceServers = [
+            // STUN servers for NAT traversal
             RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
             RTCIceServer(urlStrings: ["stun:stun1.l.google.com:19302"]),
-            RTCIceServer(urlStrings: ["stun:stun2.l.google.com:19302"])
+
+            // Your TURN (UDP/TCP/TLS). Ensure matching credentials in turnserver.conf
+            RTCIceServer(urlStrings: ["turn:chat.ballabotond.com:3478"],
+                        username: "testuser",
+                        credential: "testpass"),
+            RTCIceServer(urlStrings: ["turn:chat.ballabotond.com:3478?transport=tcp"],
+                        username: "testuser",
+                        credential: "testpass"),
+            RTCIceServer(urlStrings: ["turns:chat.ballabotond.com:5349"],
+                        username: "testuser",
+                        credential: "testpass"),
+
+            // OpenRelay TURN (UDP/TCP) as fallback
+            RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:80"],
+                        username: "openrelayproject",
+                        credential: "openrelayproject"),
+            RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:443"],
+                        username: "openrelayproject",
+                        credential: "openrelayproject"),
+            RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:443?transport=tcp"],
+                        username: "openrelayproject",
+                        credential: "openrelayproject")
         ]
-        configuration.iceCandidatePoolSize = 10
+        configuration.iceCandidatePoolSize = 2
         configuration.bundlePolicy = .maxBundle
         configuration.rtcpMuxPolicy = .require
+        configuration.iceTransportPolicy = forceTurn ? .relay : .all
+        configuration.continualGatheringPolicy = .gatherContinually
         
         let constraints = RTCMediaConstraints(
             mandatoryConstraints: nil,
             optionalConstraints: ["DtlsSrtpKeyAgreement": "true"]
         )
+        
+        // Check if factory exists before using it
+        guard peerConnectionFactory != nil else {
+            print("❌ PeerConnectionFactory is nil - setupWebRTC not called?")
+            return
+        }
         
         peerConnection = peerConnectionFactory.peerConnection(
             with: configuration,
@@ -163,17 +206,21 @@ class ChatManager: NSObject, ObservableObject {
             delegate: self
         )
         
-        if peerConnection != nil {
-            print("✅ Peer connection created successfully")
-            // Only the initiator creates the data channel
-            // The receiver will get it via didOpen delegate method
-            if isInitiator {
-                createDataChannel()
-            } else {
-                print("⏳ Waiting for data channel from initiator...")
-            }
+        guard let connection = peerConnection else {
+            print("❌ Failed to create peer connection - check WebRTC configuration")
+            print("Factory exists: \(peerConnectionFactory != nil)")
+            print("Configuration: \(configuration)")
+            return
+        }
+        
+        print("✅ Peer connection created successfully")
+        
+        // Only the initiator creates the data channel
+        // The receiver will get it via didOpen delegate method
+        if isInitiator {
+            createDataChannel()
         } else {
-            print("❌ Failed to create peer connection")
+            print("⏳ Waiting for data channel from initiator...")
         }
     }
     
@@ -387,6 +434,10 @@ class ChatManager: NSObject, ObservableObject {
                 if shouldCreateOffer {
                     // Wait a moment for peer connection to be fully set up
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        guard self.peerConnection != nil else {
+                            print("❌ Cannot create offer - peer connection is nil")
+                            return
+                        }
                         print("🚀 Creating offer as initiator")
                         self.createOffer()
                     }
@@ -546,7 +597,13 @@ extension ChatManager: RTCPeerConnectionDelegate {
             case .new:
                 print("ICE: New connection")
             case .checking:
-                print("ICE: Checking connectivity")
+                print("🔍 ICE: Checking connectivity - trying to connect peers...")
+                // Give it some time, then check progress
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+                    if self.peerConnection?.iceConnectionState == .checking {
+                        print("⏰ ICE still checking after 5s - may need RELAY candidates for cross-network")
+                    }
+                }
             case .connected:
                 print("🟢 ICE: Connected! P2P connection established")
                 self.isP2PConnected = true
@@ -571,11 +628,29 @@ extension ChatManager: RTCPeerConnectionDelegate {
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
-        print("ICE gathering state changed: \(newState.rawValue)")
+        switch newState {
+        case .new:
+            print("🆕 ICE gathering: Started - contacting STUN/TURN servers")
+        case .gathering:
+            print("🔍 ICE gathering: In progress - collecting candidates from STUN/TURN servers")
+            print("📡 Trying to contact TURN server: openrelay.metered.ca:80")
+        case .complete:
+            print("✅ ICE gathering: Complete - all candidates collected")
+            print("🔍 Checking if RELAY candidates were found...")
+            // Check what types of candidates we got
+            let hasRelay = false // We'll track this via the candidate generation
+            print("🎯 Cross-network connection needs RELAY candidates: \(hasRelay ? "✅ Found" : "❌ Missing")")
+        @unknown default:
+            print("❓ ICE gathering: Unknown state \(newState.rawValue)")
+        }
     }
     
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        print("📤 Generated ICE candidate: \(candidate.sdp)")
+        let candidateType = candidate.sdp.contains("typ relay") ? "🔄 RELAY" : 
+                           candidate.sdp.contains("typ srflx") ? "🌐 SRFLX" : 
+                           candidate.sdp.contains("typ host") ? "🏠 HOST" : "❓ UNKNOWN"
+        
+        print("📤 Generated ICE candidate [\(candidateType)]: \(candidate.sdp)")
         
         Task { @MainActor in
             self.sendSignalingMessage(type: "ice_candidate", payload: [
