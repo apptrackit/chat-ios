@@ -50,6 +50,16 @@ struct ContentView: View {
                         Text("Room: \(chatManager.roomId)")
                             .font(.headline)
                             .padding(.top)
+
+                        Button(role: .destructive) {
+                            chatManager.leave()
+                            messageText = ""
+                        } label: {
+                            Text("Leave Room")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .padding(.horizontal)
                         
                         if !chatManager.isP2PConnected {
                             Text("Waiting for P2P connection...")

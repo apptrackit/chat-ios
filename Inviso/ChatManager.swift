@@ -98,6 +98,27 @@ class ChatManager: NSObject, ObservableObject {
         self.roomId = roomId
         sendMessage(type: "join_room", payload: ["roomId": roomId])
     }
+
+    func leave() {
+        print("🚪 Leaving room and disconnecting P2P")
+        // Notify signaling server (keep WS open for future joins)
+        if !roomId.isEmpty {
+            sendMessage(type: "leave_room", payload: [:])
+        }
+
+        // Close data channel and peer connection
+        dataChannel?.close()
+        dataChannel = nil
+        peerConnection?.close()
+        peerConnection = nil
+
+        // Reset state
+        isP2PConnected = false
+        roomId = ""
+        pendingIceCandidates.removeAll()
+        connectionStatus = .connected // still connected to signaling
+        print("✅ Left room and reset P2P state")
+    }
     
     func sendMessage(_ text: String) {
         guard isP2PConnected, let dataChannel = dataChannel else {
@@ -459,6 +480,20 @@ class ChatManager: NSObject, ObservableObject {
                 self.peerConnection?.close()
                 self.peerConnection = nil
                 self.dataChannel = nil
+                self.roomId = ""
+                print("ℹ️ Peer disconnected; cleaned up local P2P state")
+
+            case "peer_left":
+                self.isP2PConnected = false
+                self.peerConnection?.close()
+                self.peerConnection = nil
+                self.dataChannel = nil
+                self.roomId = ""
+                print("ℹ️ Peer left; cleaned up local P2P state")
+
+            case "left_room":
+                // Confirmation from server; keep WS connection
+                print("✅ Confirmed left room \(json["roomId"] as? String ?? "")")
                 
             case "error":
                 if let error = json["error"] as? String {
