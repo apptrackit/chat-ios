@@ -36,6 +36,13 @@ class ChatManager: NSObject, ObservableObject {
     private var clientId: String?
     private var pendingIceCandidates: [RTCIceCandidate] = []
     
+    // WebSocket resilience
+    private var pingTimer: Timer?
+    private var isPinging: Bool = false
+    private var isAwaitingLeaveAck: Bool = false
+    private var pendingJoinRoomId: String?
+    private var reconnectWorkItem: DispatchWorkItem?
+    
     private let signalingServerURL = "wss://chat.ballabotond.com"
     // For local testing, use: "ws://localhost:8080"
     
@@ -65,16 +72,11 @@ class ChatManager: NSObject, ObservableObject {
         let urlSession = URLSession(configuration: .default)
         webSocket = urlSession.webSocketTask(with: url)
         webSocket?.resume()
+    startHeartbeat()
         
-        // Send a ping to test connection
+        // Initial connectivity probe (optional)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            self.webSocket?.sendPing { error in
-                if let error = error {
-                    print("WebSocket ping failed: \(error)")
-                } else {
-                    print("WebSocket ping successful")
-                }
-            }
+            self.sendPing()
         }
         
         receiveMessages()
@@ -83,6 +85,8 @@ class ChatManager: NSObject, ObservableObject {
     func disconnect() {
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
+    stopHeartbeat()
+    reconnectWorkItem?.cancel()
         peerConnection?.close()
         peerConnection = nil
         dataChannel = nil
@@ -95,15 +99,31 @@ class ChatManager: NSObject, ObservableObject {
     }
     
     func joinRoom(roomId: String) {
-        self.roomId = roomId
-        sendMessage(type: "join_room", payload: ["roomId": roomId])
+        // If WS is not connected, connect and defer the join until connected
+        if connectionStatus != .connected || webSocket == nil {
+            print("🔌 Not connected to signaling yet, will connect and then join room \(roomId)")
+            pendingJoinRoomId = roomId
+            connect()
+        } else {
+            self.roomId = roomId
+            sendMessage(type: "join_room", payload: ["roomId": roomId])
+        }
     }
 
     func leave() {
         print("🚪 Leaving room and disconnecting P2P")
         // Notify signaling server (keep WS open for future joins)
         if !roomId.isEmpty {
+            isAwaitingLeaveAck = true
             sendMessage(type: "leave_room", payload: [:])
+            // Fallback: if server doesn't support leave_room, force a quick WS reset
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self = self else { return }
+                if self.isAwaitingLeaveAck {
+                    print("⏳ No left_room ack from server; forcing WS reconnect to clear state")
+                    self.forceReconnect(reason: "leave ack timeout")
+                }
+            }
         }
 
         // Close data channel and peer connection
@@ -116,7 +136,7 @@ class ChatManager: NSObject, ObservableObject {
         isP2PConnected = false
         roomId = ""
         pendingIceCandidates.removeAll()
-        connectionStatus = .connected // still connected to signaling
+    if webSocket != nil { connectionStatus = .connected } // still connected to signaling
         print("✅ Left room and reset P2P state")
     }
     
@@ -408,16 +428,7 @@ class ChatManager: NSObject, ObservableObject {
                 print("WebSocket receive error: \(error.localizedDescription)")
                 print("Error code: \((error as NSError).code)")
                 print("Error domain: \((error as NSError).domain)")
-                Task { @MainActor in
-                    self.connectionStatus = .disconnected
-                    // Try to reconnect after a delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        if self.connectionStatus == .disconnected {
-                            print("Attempting to reconnect...")
-                            self.connect()
-                        }
-                    }
-                }
+                self.handleWebSocketFailureAndReconnect()
             }
         }
     }
@@ -436,6 +447,13 @@ class ChatManager: NSObject, ObservableObject {
                 self.connectionStatus = .connected
                 self.clientId = json["clientId"] as? String
                 print("Connected to signaling server with ID: \(self.clientId ?? "unknown")")
+                // If we had a pending join, perform it now
+                if let pending = self.pendingJoinRoomId, !pending.isEmpty {
+                    print("➡️ Sending deferred join for room \(pending)")
+                    self.roomId = pending
+                    self.sendMessage(type: "join_room", payload: ["roomId": pending])
+                    self.pendingJoinRoomId = nil
+                }
                 
             case "room_joined":
                 if let roomId = json["roomId"] as? String {
@@ -494,6 +512,7 @@ class ChatManager: NSObject, ObservableObject {
             case "left_room":
                 // Confirmation from server; keep WS connection
                 print("✅ Confirmed left room \(json["roomId"] as? String ?? "")")
+                self.isAwaitingLeaveAck = false
                 
             case "error":
                 if let error = json["error"] as? String {
@@ -714,6 +733,83 @@ extension ChatManager: RTCPeerConnectionDelegate {
             self.isP2PConnected = true
             print("✅ P2P connection fully established with data channel: \(dataChannel.label)")
         }
+    }
+}
+
+// MARK: - WebSocket Heartbeat & Reconnect
+
+private extension ChatManager {
+    func startHeartbeat() {
+        stopHeartbeat()
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 25.0, repeats: true) { [weak self] _ in
+            self?.sendPing()
+        }
+        RunLoop.main.add(pingTimer!, forMode: .common)
+    }
+    
+    func stopHeartbeat() {
+        pingTimer?.invalidate()
+        pingTimer = nil
+        isPinging = false
+    }
+    
+    func sendPing() {
+        guard let ws = webSocket else { return }
+        if isPinging { return }
+        isPinging = true
+        var completed = false
+        ws.sendPing { [weak self] error in
+            guard let self = self else { return }
+            completed = true
+            self.isPinging = false
+            if let error = error {
+                print("❌ WebSocket ping failed: \(error.localizedDescription)")
+                self.forceReconnect(reason: "ping error")
+            } else {
+                // print("🏓 Pong")
+            }
+        }
+        // Failsafe timeout for pong
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) { [weak self] in
+            guard let self = self else { return }
+            if !completed {
+                print("⏱️ WebSocket ping timeout - reconnecting")
+                self.isPinging = false
+                self.forceReconnect(reason: "ping timeout")
+            }
+        }
+    }
+    
+    func handleWebSocketFailureAndReconnect() {
+        Task { @MainActor in
+            stopHeartbeat()
+            webSocket?.cancel(with: .abnormalClosure, reason: nil)
+            webSocket = nil
+            connectionStatus = .disconnected
+            reconnectWorkItem?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                print("Attempting to reconnect...")
+                self.connect()
+            }
+            reconnectWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
+        }
+    }
+    
+    func forceReconnect(reason: String) {
+        print("🔁 Forcing WS reconnect (reason: \(reason))")
+        stopHeartbeat()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        connectionStatus = .disconnected
+        // Preserve roomId for potential rejoin; if we explicitly left, roomId is already ""
+        reconnectWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.connect()
+        }
+        reconnectWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 }
 
