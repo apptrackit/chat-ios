@@ -11,6 +11,7 @@ struct ContentView: View {
     @StateObject private var chatManager = ChatManager()
     @State private var messageText = ""
     @State private var roomId = ""
+    @State private var deviceID = DeviceIDManager.shared.id
     
     var body: some View {
         NavigationView {
@@ -28,6 +29,26 @@ struct ContentView: View {
                 }
                 .padding(.horizontal)
                 
+                // Device ID
+                HStack {
+                    Text("Device ID:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text(deviceID)
+                        .font(.caption2)
+                        .textSelection(.enabled)
+                    #if DEBUG
+                    Spacer(minLength: 8)
+                    Button("Reset") {
+                        DeviceIDManager.shared.reset()
+                        deviceID = DeviceIDManager.shared.id
+                    }
+                    .font(.caption)
+                    #endif
+                    Spacer()
+                }
+                .padding(.horizontal)
+
                 // Room Connection
                 if chatManager.connectionStatus == .disconnected || chatManager.roomId.isEmpty {
                     VStack {
