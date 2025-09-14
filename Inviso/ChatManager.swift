@@ -15,6 +15,7 @@ class ChatManager: NSObject, ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var roomId: String = ""
     @Published var isP2PConnected: Bool = false
+    @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
 
     // Components
     private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
@@ -24,6 +25,8 @@ class ChatManager: NSObject, ObservableObject {
     private var clientId: String?
     private var isAwaitingLeaveAck = false
     private var pendingJoinRoomId: String?
+    private var suppressReconnectOnce = false
+    private var hadP2POnce = false
 
     override init() {
         super.init()
@@ -53,6 +56,7 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     func joinRoom(roomId: String) {
+    if isEphemeral { messages.removeAll() }
         if connectionStatus != .connected {
             pendingJoinRoomId = roomId
             connect()
@@ -62,8 +66,10 @@ class ChatManager: NSObject, ObservableObject {
         signaling.send(["type": "join_room", "roomId": roomId])
     }
 
-    func leave() {
+    func leave(userInitiated: Bool = false) {
+        if userInitiated { suppressReconnectOnce = true }
         guard !roomId.isEmpty else { return }
+        if isEphemeral { messages.removeAll() }
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
@@ -75,10 +81,12 @@ class ChatManager: NSObject, ObservableObject {
         // Fallback: gently reconnect WS if no ack after a short delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
-            if self.isAwaitingLeaveAck && self.connectionStatus == .connected && currentRoom.isEmpty == false {
+            if self.isAwaitingLeaveAck && self.connectionStatus == .connected && currentRoom.isEmpty == false && self.suppressReconnectOnce == false {
                 self.signaling.disconnect()
                 self.signaling.connect()
             }
+            // Reset the one-shot suppress flag after evaluating fallback.
+            self.suppressReconnectOnce = false
         }
     }
 
@@ -94,6 +102,8 @@ class ChatManager: NSObject, ObservableObject {
         switch type {
         case "room_joined":
             if let roomId = json["roomId"] as? String { self.roomId = roomId }
+            // Reset per-room P2P flag; initial connect shouldn't create a system message
+            hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
             pcm.createPeerConnection(isInitiator: isInitiator)
@@ -128,6 +138,7 @@ class ChatManager: NSObject, ObservableObject {
             self.isP2PConnected = false
             self.pcm.close()
             self.roomId = ""
+            self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
         case "left_room":
             self.isAwaitingLeaveAck = false
         case "error":
@@ -155,7 +166,14 @@ extension ChatManager: PeerConnectionManagerDelegate {
             "sdpMid": candidate.sdpMid ?? ""
         ]])
     }
-    func pcmIceStateChanged(connected: Bool) { isP2PConnected = connected }
+    func pcmIceStateChanged(connected: Bool) {
+        let was = isP2PConnected
+        isP2PConnected = connected
+        if connected && was == false {
+            messages.append(ChatMessage(text: "Client joined the room", timestamp: Date(), isFromSelf: false, isSystem: true))
+            hadP2POnce = true
+        }
+    }
     func pcmDidReceiveMessage(_ text: String) {
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
     }

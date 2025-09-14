@@ -2,48 +2,92 @@ import SwiftUI
 import UIKit
 
 struct ChatView: View {
-    // Placeholder UI state (to be replaced when wiring to ChatManager)
-    @State private var messages: [MessageItem] = [
-        .init(id: UUID(), text: "Welcome to the room.", isFromSelf: false, time: Date()),
-        .init(id: UUID(), text: "Thanks!", isFromSelf: true, time: Date()),
-    ]
+    @EnvironmentObject private var chat: ChatManager
+    @Environment(\.dismiss) private var dismiss
     @State private var input: String = ""
+    @State private var showLeaveConfirm = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Messages list
+    ZStack(alignment: .center) {
+            // Messages list (always shown so user can see history)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, msg in
-                            let showTime = index == 0 || !Calendar.current.isDate(msg.time, equalTo: messages[index - 1].time, toGranularity: .minute)
-                            ChatBubble(message: msg, showTime: showTime)
-                                .id(msg.id)
-                                .padding(.horizontal)
+                        ForEach(Array(chat.messages.enumerated()), id: \.element.id) { index, msg in
+                            if msg.isSystem {
+                                Text(msg.text)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 2)
+                                    .id(msg.id)
+                                    .padding(.horizontal)
+                            } else {
+                                let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
+                                ChatBubble(message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp), showTime: showTime)
+                                    .id(msg.id)
+                                    .padding(.horizontal)
+                            }
                         }
                     }
                     .padding(.vertical, 12)
                 }
-                .onChange(of: messages.count) { _ in
-                    if let last = messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: chat.messages.count) { _ in
+                    if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
             }
         }
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showLeaveConfirm = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Leave")
+                    }
+                }
+                .accessibilityLabel("Back")
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Circle()
+                    .fill(chat.isP2PConnected ? Color.green : Color.yellow)
+                    .frame(width: 10, height: 10)
+                    .accessibilityLabel(chat.isP2PConnected ? "Connected" : "Waiting")
+                    .allowsHitTesting(false)
+            }
+        }
+        .alert("Leave chat?", isPresented: $showLeaveConfirm) {
+            Button("Leave", role: .destructive) {
+                // Dismiss first to avoid UI race, then leave/disconnect
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    safeLeave()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will disconnect from this room.")
+        }
+        .background(DisablePopGesture())
         .safeAreaInset(edge: .bottom) {
             Group {
                 let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 HStack(spacing: 8) {
-                    SearchBarField(text: $input, placeholder: "Message", onSubmit: { send() })
+                    SearchBarField(text: $input, placeholder: chat.isP2PConnected ? "Message" : "Waiting for P2P…", onSubmit: { send() })
                         .frame(height: 36)
-                    if hasText {
+                        .disabled(!chat.isP2PConnected)
+                        .opacity(chat.isP2PConnected ? 1 : 0.6)
+                    if hasText && chat.isP2PConnected {
                         Button(action: send) {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
-                                .frame(width: 22, height: 30)
+                                .frame(width: 36, height: 36)
                         }
                         .transition(.scale.combined(with: .opacity))
                         .buttonStyle(.glass)
@@ -59,10 +103,36 @@ struct ChatView: View {
 
     private func send() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let new = MessageItem(id: UUID(), text: trimmed, isFromSelf: true, time: Date())
-        messages.append(new)
+    guard !trimmed.isEmpty, chat.isP2PConnected else { return }
+        chat.sendMessage(trimmed)
         input = ""
+    }
+
+    private func safeLeave() {
+        if chat.roomId.isEmpty {
+            chat.disconnect()
+        } else {
+            chat.leave(userInitiated: true)
+        }
+    }
+}
+
+// Helper to disable the interactive pop (swipe-back) gesture so the confirmation can't be bypassed.
+private struct DisablePopGesture: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> UIViewController {
+        Controller()
+    }
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+
+    private final class Controller: UIViewController {
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
+        }
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
+        }
     }
 }
 
@@ -106,7 +176,7 @@ struct MessageItem: Identifiable, Equatable {
 }
 
 #Preview {
-    NavigationView { ChatView() }
+    NavigationView { ChatView().environmentObject(ChatManager()) }
 }
 
 private extension View {

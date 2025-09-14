@@ -17,12 +17,6 @@ struct SessionsView: View {
                     }
                     .accessibilityLabel("Settings")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { goToChat = true }) {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Add (Temp: Open Chat)")
-                }
             }
     }
 

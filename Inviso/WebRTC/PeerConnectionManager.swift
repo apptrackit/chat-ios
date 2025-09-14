@@ -129,23 +129,33 @@ extension PeerConnectionManager: RTCPeerConnectionDelegate {
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
         let connected = (newState == .connected || newState == .completed)
-        delegate?.pcmIceStateChanged(connected: connected)
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.pcmIceStateChanged(connected: connected)
+        }
     }
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        delegate?.pcmDidGenerateIce(candidate)
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.pcmDidGenerateIce(candidate)
+        }
     }
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
         self.dataChannel = dataChannel
         dataChannel.delegate = self
-        delegate?.pcmIceStateChanged(connected: true)
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.pcmIceStateChanged(connected: true)
+        }
     }
 }
 
 extension PeerConnectionManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        if let text = String(data: buffer.data, encoding: .utf8) { delegate?.pcmDidReceiveMessage(text) }
+        if let text = String(data: buffer.data, encoding: .utf8) {
+            DispatchQueue.main.async { [weak self] in
+                self?.delegate?.pcmDidReceiveMessage(text)
+            }
+        }
     }
 }

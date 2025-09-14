@@ -24,6 +24,7 @@ struct ContentView: View {
                 }
             }
             .searchable(text: $search)
+            
         } else {
             // Fallback for older iOS: standard TabView with a dedicated Search tab
             TabView {
