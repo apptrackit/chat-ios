@@ -18,4 +18,5 @@ struct ChatMessage: Identifiable, Equatable {
     let text: String
     let timestamp: Date
     let isFromSelf: Bool
+    var isSystem: Bool = false
 }

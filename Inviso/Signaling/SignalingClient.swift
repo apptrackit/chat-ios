@@ -37,7 +37,9 @@ final class SignalingClient {
         let ws = webSocket
         webSocket = nil
         status = .disconnected
-        delegate?.signalingClosed()
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.signalingClosed()
+        }
         DispatchQueue.global(qos: .utility).async {
             ws?.cancel(with: .goingAway, reason: nil)
         }
@@ -65,13 +67,19 @@ final class SignalingClient {
                         if type == "connected" {
                             self.status = .connected
                             let clientId = json["clientId"] as? String ?? ""
-                            self.delegate?.signalingConnected(clientId: clientId)
+                            DispatchQueue.main.async { [weak self] in
+                                self?.delegate?.signalingConnected(clientId: clientId)
+                            }
                         }
-                        self.delegate?.signalingMessage(json)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.delegate?.signalingMessage(json)
+                        }
                     }
                 case .data(let data):
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        self.delegate?.signalingMessage(json)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.delegate?.signalingMessage(json)
+                        }
                     }
                 @unknown default:
                     break
@@ -126,7 +134,9 @@ final class SignalingClient {
         webSocket?.cancel(with: .abnormalClosure, reason: nil)
         webSocket = nil
         status = .disconnected
-        delegate?.signalingClosed()
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.signalingClosed()
+        }
         reconnectWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.connect() }
         reconnectWorkItem = work
