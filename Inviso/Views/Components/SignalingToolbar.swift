@@ -3,14 +3,58 @@ import SwiftUI
 // Reusable top toolbar showing Settings and signaling status (dot + text in the center)
 struct SignalingToolbar: ViewModifier {
     @EnvironmentObject private var chat: ChatManager
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isExpanded = false
 
     func body(content: Content) -> some View {
-        content.toolbar {
+        ZStack {
+            content
+            // Tap background to collapse when expanded
+            if isExpanded {
+                Color.clear
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring()) { isExpanded = false }
+                    }
+            }
+        }
+    .onDisappear { isExpanded = false }
+    .onChange(of: scenePhase) { _ in isExpanded = false }
+    .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 NavigationLink(destination: SettingsView()) {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("Settings")
+            }
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // Join button (primary). First tap expands, second tap (when expanded) performs Join.
+                Button {
+                    withAnimation(.spring()) {
+                        if isExpanded {
+                            print("Join tapped")
+                            isExpanded = false
+                        } else {
+                            isExpanded = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                }
+                .accessibilityLabel("Join")
+
+                // Create button (shows when expanded)
+                if isExpanded {
+                    Button {
+                        print("Create tapped")
+                        withAnimation(.spring()) { isExpanded = false }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Create")
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
