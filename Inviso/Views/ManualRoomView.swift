@@ -6,24 +6,7 @@ struct ManualRoomView: View {
     @State private var goToChat = false
 
     var body: some View {
-        VStack(spacing: 16) {
-            // Connection status row
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                Text(statusText)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-                if chat.isP2PConnected {
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .foregroundColor(.green)
-                        .accessibilityLabel("P2P Connected")
-                }
-            }
-            .padding(.horizontal)
-
+    VStack(spacing: 16) {
             // Room input
             VStack(alignment: .leading, spacing: 8) {
                 Text("Room ID")
@@ -65,6 +48,20 @@ struct ManualRoomView: View {
                 }
                 .accessibilityLabel("Settings")
             }
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 10, height: 10)
+                        .allowsHitTesting(false)
+                    Text(statusText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .allowsHitTesting(false)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Signaling status: \(statusText)")
+            }
         }
     .onChange(of: chat.isP2PConnected) { _ in /* ChatView shows state; no nav needed here */ }
         .onAppear {
@@ -75,17 +72,18 @@ struct ManualRoomView: View {
         .onDisappear { chat.isEphemeral = false }
     }
 
-    private var statusText: String {
-        if !chat.roomId.isEmpty {
-            return chat.isP2PConnected ? "In room • P2P ready" : "In room • waiting for peer…"
-        }
-        return chat.connectionStatus.rawValue
-    }
     private var statusColor: Color {
         switch chat.connectionStatus {
         case .connected: return .green
         case .connecting: return .orange
         case .disconnected: return .red
+        }
+    }
+
+    private var statusText: String {
+        switch chat.connectionStatus {
+        case .connected: return "Connected"
+        case .connecting, .disconnected: return "Waiting"
         }
     }
 
