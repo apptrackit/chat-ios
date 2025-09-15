@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		493A515F2E783575004692B2 /* trackit icon 2.icon in Resources */ = {isa = PBXBuildFile; fileRef = 493A515E2E783575004692B2 /* trackit icon 2.icon */; };
 		49AE6D142E74AB0D0076150B /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 49AE6D132E74AB0D0076150B /* WebRTC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		493A515E2E783575004692B2 /* trackit icon 2.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "trackit icon 2.icon"; sourceTree = "<group>"; };
 		49AE6BF72E7488960076150B /* Inviso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inviso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -37,6 +39,7 @@
 		49AE6BEE2E7488960076150B = {
 			isa = PBXGroup;
 			children = (
+				493A515E2E783575004692B2 /* trackit icon 2.icon */,
 				49AE6BF92E7488960076150B /* Inviso */,
 				49AE6BF82E7488960076150B /* Products */,
 			);
@@ -118,6 +121,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				493A515F2E783575004692B2 /* trackit icon 2.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -258,7 +262,7 @@
 		49AE6C032E7488970076150B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "trackit icon 2";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
@@ -291,7 +295,7 @@
 		49AE6C042E7488970076150B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "trackit icon 2";
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
