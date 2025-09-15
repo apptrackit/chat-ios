@@ -150,7 +150,10 @@ extension SessionsView {
             if let s = renamingSession { chat.renameSession(s, newName: newName?.isEmpty == true ? nil : newName) }
             renamingSession = nil
         }))
-        UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true)
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let root = scene.keyWindow?.rootViewController {
+            root.present(alert, animated: true)
+        }
     }
 }
 

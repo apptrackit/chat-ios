@@ -100,10 +100,7 @@ struct SignalingToolbar: ViewModifier {
                             let code = joinCode
                             Task { @MainActor in
                                 if let roomId = await chat.acceptJoinCode(code) {
-                                    // Save as accepted session and navigate to chat
-                                    let session = ChatSession(name: nil, code: code, roomId: roomId, status: .accepted, isCreatedByMe: false)
-                                    chat.sessions.insert(session, at: 0)
-                                    chat.activeSessionId = session.id
+                                    _ = chat.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
                                     chat.joinRoom(roomId: roomId)
                                 }
                             }

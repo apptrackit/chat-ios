@@ -145,6 +145,16 @@ class ChatManager: NSObject, ObservableObject {
         persistSessions()
     }
 
+    /// Create and persist an accepted session (used for client2 joining by code, or when we already have roomId)
+    @discardableResult
+    func addAcceptedSession(name: String?, code: String, roomId: String, isCreatedByMe: Bool) -> ChatSession {
+        let s = ChatSession(name: name, code: code, roomId: roomId, createdAt: Date(), expiresAt: nil, status: .accepted, isCreatedByMe: isCreatedByMe)
+        sessions.insert(s, at: 0)
+        activeSessionId = s.id
+        persistSessions()
+        return s
+    }
+
     // MARK: - Backend REST integration
     private func createPendingOnServer(session: ChatSession) async {
         let joinid = session.code

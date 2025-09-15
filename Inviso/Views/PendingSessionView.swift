@@ -12,6 +12,8 @@ struct PendingSessionView: View {
     @State private var goToChat = false
     @State private var isVisible = false
     @State private var ticker = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
+    @State private var showRenameAlert = false
+    @State private var renameText: String = ""
 
     var body: some View {
         ZStack {
@@ -68,6 +70,13 @@ struct PendingSessionView: View {
                     .frame(width: 10, height: 10)
                     .accessibilityLabel("Waiting for acceptance")
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    renameText = session.name ?? ""
+                    showRenameAlert = true
+                } label: { Image(systemName: "pencil") }
+                .accessibilityLabel("Rename")
+            }
         }
         .onAppear {
             isVisible = true
@@ -80,6 +89,13 @@ struct PendingSessionView: View {
             if isVisible && scenePhase == .active {
                 chat.pollPendingAndValidateRooms()
             }
+        }
+        .alert("Rename Room", isPresented: $showRenameAlert) {
+            TextField("Name", text: $renameText)
+            Button("Save") {
+                chat.renameSession(session, newName: renameText.isEmpty ? nil : renameText)
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
