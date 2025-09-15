@@ -1,13 +1,17 @@
 import SwiftUI
 import UIKit
+import Combine
 
 struct PendingSessionView: View {
     @EnvironmentObject private var chat: ChatManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     var session: ChatSession
 
     @State private var goToChat = false
+    @State private var isVisible = false
+    @State private var ticker = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -65,14 +69,24 @@ struct PendingSessionView: View {
                     .accessibilityLabel("Waiting for acceptance")
             }
         }
-        .onAppear { watchAcceptance() }
+        .onAppear {
+            isVisible = true
+            chat.pollPendingAndValidateRooms()
+            watchAcceptance()
+        }
+        .onDisappear { isVisible = false }
         .onChange(of: chat.sessions) { _ in watchAcceptance() }
+        .onReceive(ticker) { _ in
+            if isVisible && scenePhase == .active {
+                chat.pollPendingAndValidateRooms()
+            }
+        }
     }
 
     private func watchAcceptance() {
         if let updated = chat.sessions.first(where: { $0.id == session.id }), updated.status == .accepted {
-            // Navigate to full chat
-            goToChat = true
+            // Close this view; user can enter chat from Sessions
+            dismiss()
         }
     }
 }
