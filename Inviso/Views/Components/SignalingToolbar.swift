@@ -98,7 +98,15 @@ struct SignalingToolbar: ViewModifier {
 
                         Button {
                             let code = joinCode
-                            print("Join code submitted: \(code)")
+                            Task { @MainActor in
+                                if let roomId = await chat.acceptJoinCode(code) {
+                                    // Save as accepted session and navigate to chat
+                                    let session = ChatSession(name: nil, code: code, roomId: roomId, status: .accepted, isCreatedByMe: false)
+                                    chat.sessions.insert(session, at: 0)
+                                    chat.activeSessionId = session.id
+                                    chat.joinRoom(roomId: roomId)
+                                }
+                            }
                             joinFieldFocused = false
                             endEditing()
                             withAnimation(.spring()) {
@@ -207,11 +215,10 @@ struct SignalingToolbar: ViewModifier {
                                 withAnimation(.spring()) { showCreatePopup = false }
                             }
                             Button {
-                                // Frontend only: generate code and present result, and create session model
+                                // Generate code, create pending on server via ChatManager
                                 createNameFocused = false
                                 endEditing()
                                 createdCode = String((0..<6).map { _ in String(Int.random(in: 0...9)) }.joined())
-                                // Create frontend session now so it appears in Sessions list
                                 _ = chat.createSession(name: roomName.isEmpty ? nil : roomName, minutes: durationMinutes, code: createdCode)
                                 withAnimation(.spring()) { showCreateResult = true }
                             } label: {

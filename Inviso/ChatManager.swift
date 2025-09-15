@@ -22,6 +22,7 @@ class ChatManager: NSObject, ObservableObject {
 
     // Components
     private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
+    private let apiBase = URL(string: "https://chat.ballabotond.com")!
     private let pcm = PeerConnectionManager()
 
     // State
@@ -35,6 +36,7 @@ class ChatManager: NSObject, ObservableObject {
         super.init()
         signaling.delegate = self
         pcm.delegate = self
+        loadSessions()
     }
 
     deinit {
@@ -72,7 +74,7 @@ class ChatManager: NSObject, ObservableObject {
     func leave(userInitiated: Bool = false) {
         if userInitiated { suppressReconnectOnce = true }
         guard !roomId.isEmpty else { return }
-        if isEphemeral { messages.removeAll() }
+    messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
@@ -105,6 +107,8 @@ class ChatManager: NSObject, ObservableObject {
         let session = ChatSession(name: name, code: code, createdAt: Date(), expiresAt: expires, status: .pending, isCreatedByMe: true)
         sessions.insert(session, at: 0)
         activeSessionId = session.id
+    persistSessions()
+    Task { await createPendingOnServer(session: session) }
         return session
     }
 
@@ -119,10 +123,136 @@ class ChatManager: NSObject, ObservableObject {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].status = .closed
         activeSessionId = nil
+    // If room exists, call backend delete
+    if let rid = sessions[idx].roomId { Task { await deleteRoomOnServer(roomId: rid) } }
+    persistSessions()
     }
 
     func selectSession(_ session: ChatSession) {
         activeSessionId = session.id
+    }
+
+    func renameSession(_ session: ChatSession, newName: String?) {
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        sessions[idx].name = newName
+        persistSessions()
+    }
+
+    func removeSession(_ session: ChatSession) {
+        if let rid = session.roomId { Task { await deleteRoomOnServer(roomId: rid) } }
+        sessions.removeAll { $0.id == session.id }
+        if activeSessionId == session.id { activeSessionId = nil }
+        persistSessions()
+    }
+
+    // MARK: - Backend REST integration
+    private func createPendingOnServer(session: ChatSession) async {
+        let joinid = session.code
+        let expISO: String
+        if let exp = session.expiresAt { expISO = ISO8601DateFormatter().string(from: exp) } else { expISO = ISO8601DateFormatter().string(from: Date().addingTimeInterval(300)) }
+        let client1 = DeviceIDManager.shared.id
+        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["joinid": joinid, "exp": expISO, "client1": client1]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do { _ = try await URLSession.shared.data(for: req) } catch { print("createPending error: \(error)") }
+    }
+
+    func acceptJoinCode(_ code: String) async -> String? {
+        let client2 = DeviceIDManager.shared.id
+        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/accept"))
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": code, "client2": client2])
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { return nil }
+            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { return rid }
+            if http.statusCode == 404 || http.statusCode == 409 { return nil }
+        } catch { print("acceptJoinCode error: \(error)") }
+        return nil
+    }
+
+    func checkPendingOnServer(joinid: String) async -> String? {
+        let client1 = DeviceIDManager.shared.id
+        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/check"))
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": joinid, "client1": client1])
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { return nil }
+            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { return rid }
+            if http.statusCode == 204 { return nil }
+            if http.statusCode == 404 { return nil }
+        } catch { print("checkPending error: \(error)") }
+        return nil
+    }
+
+    func getRoom(roomId: String) async -> (client1: String, client2: String)? {
+        guard var comps = URLComponents(url: apiBase.appendingPathComponent("/api/rooms"), resolvingAgainstBaseURL: false) else { return nil }
+        comps.queryItems = [URLQueryItem(name: "roomid", value: roomId)]
+        guard let url = comps.url else { return nil }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let c1 = json["client1"] as? String, let c2 = json["client2"] as? String { return (c1, c2) }
+        } catch { print("getRoom error: \(error)") }
+        return nil
+    }
+
+    func deleteRoomOnServer(roomId: String) async {
+        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
+        req.httpMethod = "DELETE"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["roomid": roomId])
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
+    // MARK: - Polling and housekeeping
+    func pollPendingAndValidateRooms() {
+        Task {
+            // 1) For each pending session, check acceptance
+            for i in sessions.indices {
+                let s = sessions[i]
+                if s.status == .pending {
+                    if let rid = await checkPendingOnServer(joinid: s.code) {
+                        sessions[i].status = .accepted
+                        sessions[i].roomId = rid
+                        persistSessions()
+                    }
+                }
+            }
+            // 2) For accepted sessions with roomId, verify room still exists
+            for i in sessions.indices {
+                let s = sessions[i]
+                if s.status == .accepted, let rid = s.roomId {
+                    let exists = await getRoom(roomId: rid) != nil
+                    if !exists {
+                        sessions[i].status = .closed
+                        sessions[i].roomId = nil
+                        persistSessions()
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Persistence
+    private let storeKey = "chat.sessions.v1"
+    private func persistSessions() {
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            UserDefaults.standard.set(data, forKey: storeKey)
+        } catch {
+            print("persistSessions error: \(error)")
+        }
+    }
+    private func loadSessions() {
+        if let data = UserDefaults.standard.data(forKey: storeKey), let arr = try? JSONDecoder().decode([ChatSession].self, from: data) {
+            self.sessions = arr
+        }
     }
 
     // Internal
@@ -181,6 +311,8 @@ extension ChatManager: SignalingClientDelegate {
     func signalingConnected(clientId: String) {
         self.clientId = clientId
         connectionStatus = .connected
+    // When WS connects, also validate backend state (pendings/rooms)
+    pollPendingAndValidateRooms()
         if let pending = pendingJoinRoomId { pendingJoinRoomId = nil; joinRoom(roomId: pending) }
     }
     func signalingMessage(_ json: [String : Any]) { handleServerMessage(json) }

@@ -5,6 +5,8 @@ struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
     @State private var goToChat = false
     @State private var goToPending = false
+    @State private var renamingSession: ChatSession? = nil
+    @State private var renameText: String = ""
 
     var body: some View {
         content
@@ -20,6 +22,7 @@ struct SessionsView: View {
             .signalingToolbar()
             .onAppear {
                 if chat.connectionStatus == .disconnected { chat.connect() }
+                chat.pollPendingAndValidateRooms()
             }
     }
 
@@ -45,7 +48,11 @@ struct SessionsView: View {
                             if session.status == .pending {
                                 goToPending = true
                             } else {
-                                goToChat = true
+                                // If accepted and has roomId, join
+                                if let rid = session.roomId {
+                                    chat.joinRoom(roomId: rid)
+                                    goToChat = true
+                                }
                             }
                         } label: {
                             HStack(spacing: 12) {
@@ -64,6 +71,21 @@ struct SessionsView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                chat.removeSession(session)
+                            } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .contextMenu {
+                            Button {
+                                promptRename(session)
+                            } label: { Label("Rename", systemImage: "pencil") }
+                            if let rid = session.roomId {
+                                Button(role: .destructive) {
+                                    Task { await chat.deleteRoomOnServer(roomId: rid) }
+                                } label: { Label("Delete on server", systemImage: "xmark.bin") }
+                            }
+                        }
                     }
                 }
                 .listStyle(.insetGrouped)
@@ -97,6 +119,26 @@ struct SessionsView: View {
     private var pendingSelectedSession: ChatSession? {
         guard goToPending, let id = chat.activeSessionId else { return nil }
         return chat.sessions.first(where: { $0.id == id })
+    }
+}
+
+// MARK: - Rename prompt
+extension SessionsView {
+    private func promptRename(_ session: ChatSession) {
+        renamingSession = session
+        renameText = session.name ?? ""
+        let alert = UIAlertController(title: "Rename Session", message: nil, preferredStyle: .alert)
+        alert.addTextField { tf in
+            tf.placeholder = "Name"
+            tf.text = renameText
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: { _ in renamingSession = nil }))
+        alert.addAction(UIAlertAction(title: "Save", style: .default, handler: { _ in
+            let newName = alert.textFields?.first?.text
+            if let s = renamingSession { chat.renameSession(s, newName: newName?.isEmpty == true ? nil : newName) }
+            renamingSession = nil
+        }))
+        UIApplication.shared.windows.first?.rootViewController?.present(alert, animated: true)
     }
 }
 

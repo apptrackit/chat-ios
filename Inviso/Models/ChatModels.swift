@@ -33,15 +33,17 @@ struct ChatSession: Identifiable, Equatable, Codable {
     let id: UUID
     var name: String?
     var code: String // 6-digit join code
+    var roomId: String? // backend room id once accepted
     var createdAt: Date
     var expiresAt: Date?
     var status: SessionStatus
     var isCreatedByMe: Bool
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, createdAt: Date = Date(), expiresAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true) {
         self.id = id
         self.name = name
         self.code = code
+        self.roomId = roomId
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.status = status
