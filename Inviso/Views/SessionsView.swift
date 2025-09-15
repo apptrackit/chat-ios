@@ -1,12 +1,16 @@
 import SwiftUI
 import UIKit
+import Combine
 
 struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
+    @Environment(\.scenePhase) private var scenePhase
     @State private var goToChat = false
     @State private var goToPending = false
     @State private var renamingSession: ChatSession? = nil
     @State private var renameText: String = ""
+    @State private var isVisible = false
+    @State private var ticker = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
 
     var body: some View {
         content
@@ -21,8 +25,16 @@ struct SessionsView: View {
             .navigationTitle("Sessions")
             .signalingToolbar()
             .onAppear {
+                isVisible = true
                 if chat.connectionStatus == .disconnected { chat.connect() }
                 chat.pollPendingAndValidateRooms()
+            }
+            .onDisappear { isVisible = false }
+            .onChange(of: scenePhase) { _ in
+                if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
+            }
+            .onReceive(ticker) { _ in
+                if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
             }
     }
 
