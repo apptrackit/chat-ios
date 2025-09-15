@@ -36,12 +36,13 @@ struct ChatView: View {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
             }
+
         }
         .navigationTitle("Chat")
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
         .navigationBarBackButtonHidden(true)
-        .toolbar {
+    .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     showLeaveConfirm = true
@@ -110,7 +111,7 @@ struct ChatView: View {
 
     private func safeLeave() {
         if chat.roomId.isEmpty {
-            chat.disconnect()
+            // Pending session: just leave view; keep session waiting
         } else {
             chat.leave(userInitiated: true)
         }

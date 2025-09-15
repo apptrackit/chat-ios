@@ -11,6 +11,14 @@ struct SignalingToolbar: ViewModifier {
     @State private var joinCode: String = ""
     @FocusState private var joinFieldFocused: Bool
     @State private var caretBlinkOn: Bool = true
+    // Create flow states
+    @State private var showCreatePopup = false
+    @State private var roomName: String = ""
+    @State private var durationMinutes: Int = 5
+    @FocusState private var createNameFocused: Bool
+    @State private var showCreateResult = false
+    @State private var createdCode: String = ""
+    @State private var navigateToChatAfterCreate = false
 
     func body(content: Content) -> some View {
         ZStack {
@@ -132,6 +140,144 @@ struct SignalingToolbar: ViewModifier {
                     }
                 }
             }
+            if showCreatePopup {
+                Color.black.opacity(0.2)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture {
+                        createNameFocused = false
+                        endEditing()
+                        withAnimation(.spring()) { showCreatePopup = false }
+                    }
+
+                VStack(spacing: 14) {
+                    if showCreateResult == false {
+                        Text("Create Room")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+
+                        // Room name
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Name")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            TextField("Optional room name", text: $roomName)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                                .focused($createNameFocused)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.15))
+                                )
+                        }
+
+                        // Duration (fixed options)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Expires in")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                ForEach([1, 5, 60, 720, 1440], id: \.self) { preset in
+                                    Button(action: { durationMinutes = preset }) {
+                                        Text(preset < 60 ? "\(preset)m" : (preset % 60 == 0 ? "\(preset/60)h" : "\(preset)m"))
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.vertical, 6)
+                                            .padding(.horizontal, 12)
+                                            .background(
+                                                Capsule().fill(preset == durationMinutes ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.12))
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            Text(formatDuration(durationMinutes))
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+
+                        HStack(spacing: 20) {
+                            Button("Cancel", role: .cancel) {
+                                createNameFocused = false
+                                endEditing()
+                                withAnimation(.spring()) { showCreatePopup = false }
+                            }
+                            Button {
+                                // Frontend only: generate code and present result, and create session model
+                                createNameFocused = false
+                                endEditing()
+                                createdCode = String((0..<6).map { _ in String(Int.random(in: 0...9)) }.joined())
+                                // Create frontend session now so it appears in Sessions list
+                                _ = chat.createSession(name: roomName.isEmpty ? nil : roomName, minutes: durationMinutes, code: createdCode)
+                                withAnimation(.spring()) { showCreateResult = true }
+                            } label: {
+                                Text("Create")
+                                    .fontWeight(.semibold)
+                            }
+                            .buttonStyle(.glass)
+                        }
+                    } else {
+                        // Result: show code + copy
+                        Text("Room Created")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        if roomName.isEmpty == false {
+                            Text("\(roomName)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        HStack(spacing: 8) {
+                            ForEach(0..<6, id: \.self) { idx in
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.15))
+                                    Text(String(createdCode[createdCode.index(createdCode.startIndex, offsetBy: idx)]))
+                                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                                }
+                                .frame(width: 48, height: 56)
+                            }
+                        }
+                        Button {
+                            UIPasteboard.general.string = createdCode
+                        } label: {
+                            Label("Copy code", systemImage: "doc.on.doc")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.top, 6)
+
+            Button("Done") {
+                            withAnimation(.spring()) {
+                                showCreatePopup = false
+                                showCreateResult = false
+                                roomName = ""
+                durationMinutes = 5
+                                createdCode = ""
+                            }
+            }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: 360)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.15))
+                )
+                .padding()
+                .transition(.scale.combined(with: .opacity))
+                .onAppear { createNameFocused = true }
+            }
         }
         .onDisappear { isExpanded = false }
         .onChange(of: scenePhase) { _ in isExpanded = false }
@@ -159,8 +305,10 @@ struct SignalingToolbar: ViewModifier {
 
                 if isExpanded {
                     Button {
-                        print("Create tapped")
-                        withAnimation(.spring()) { isExpanded = false }
+                        withAnimation(.spring()) {
+                            showCreatePopup = true
+                            isExpanded = false
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -209,6 +357,20 @@ struct SignalingToolbar: ViewModifier {
         guard index < joinCode.count else { return "" }
         let idx = joinCode.index(joinCode.startIndex, offsetBy: index)
         return String(joinCode[idx])
+    }
+
+    private func formatDuration(_ minutes: Int) -> String {
+        switch minutes {
+        case 1: return "1 minute"
+        case 5: return "5 minutes"
+        case 60: return "1 hour"
+        case 720: return "12 hours"
+        case 1440: return "24 hours"
+        default:
+            if minutes < 60 { return "\(minutes) minutes" }
+            let h = minutes / 60
+            return "\(h) hours"
+        }
     }
 }
 

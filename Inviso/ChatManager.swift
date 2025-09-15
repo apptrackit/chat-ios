@@ -16,6 +16,9 @@ class ChatManager: NSObject, ObservableObject {
     @Published var roomId: String = ""
     @Published var isP2PConnected: Bool = false
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
+    // Sessions (frontend)
+    @Published var sessions: [ChatSession] = []
+    @Published var activeSessionId: UUID?
 
     // Components
     private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
@@ -96,6 +99,32 @@ class ChatManager: NSObject, ObservableObject {
         if ok { messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true)) }
     }
 
+    // MARK: - Sessions (frontend only)
+    func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
+        let expires: Date? = minutes > 0 ? Date().addingTimeInterval(TimeInterval(minutes) * 60.0) : nil
+        let session = ChatSession(name: name, code: code, createdAt: Date(), expiresAt: expires, status: .pending, isCreatedByMe: true)
+        sessions.insert(session, at: 0)
+        activeSessionId = session.id
+        return session
+    }
+
+    func markActiveSessionAccepted() {
+        guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        if sessions[idx].status != .accepted {
+            sessions[idx].status = .accepted
+        }
+    }
+
+    func closeActiveSession() {
+        guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].status = .closed
+        activeSessionId = nil
+    }
+
+    func selectSession(_ session: ChatSession) {
+        activeSessionId = session.id
+    }
+
     // Internal
     private func handleServerMessage(_ json: [String: Any]) {
         guard let type = json["type"] as? String else { return }
@@ -172,6 +201,8 @@ extension ChatManager: PeerConnectionManagerDelegate {
         if connected && was == false {
             messages.append(ChatMessage(text: "Client joined the room", timestamp: Date(), isFromSelf: false, isSystem: true))
             hadP2POnce = true
+            // When P2P comes up for created session, consider as accepted
+            markActiveSessionAccepted()
         }
     }
     func pcmDidReceiveMessage(_ text: String) {
