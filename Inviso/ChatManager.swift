@@ -101,6 +101,16 @@ class ChatManager: NSObject, ObservableObject {
         if ok { messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true)) }
     }
 
+    // MARK: - Full local reset for Settings > Erase All Data
+    func eraseLocalState() {
+        // Disconnect transports and clear runtime state
+        disconnect()
+        // Clear sessions and persisted store
+        sessions.removeAll()
+        activeSessionId = nil
+        persistSessions()
+    }
+
     // MARK: - Sessions (frontend only)
     func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
         let expires: Date? = minutes > 0 ? Date().addingTimeInterval(TimeInterval(minutes) * 60.0) : nil
