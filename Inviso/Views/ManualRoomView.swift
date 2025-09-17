@@ -40,29 +40,8 @@ struct ManualRoomView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(UIColor.systemGroupedBackground))
-        .navigationTitle("Manual Room")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                NavigationLink(destination: SettingsView()) {
-                    Image(systemName: "gearshape")
-                }
-                .accessibilityLabel("Settings")
-            }
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 10, height: 10)
-                        .allowsHitTesting(false)
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .allowsHitTesting(false)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Signaling status: \(statusText)")
-            }
-        }
+    .navigationTitle("Manual Room")
+    .signalingToolbar()
     .onChange(of: chat.isP2PConnected) { _ in /* ChatView shows state; no nav needed here */ }
         .onAppear {
             // Keep status fresh; auto-connect WS in background if needed when typing
