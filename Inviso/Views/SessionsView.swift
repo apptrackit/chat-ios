@@ -79,13 +79,15 @@ struct SessionsView: View {
                                         .foregroundColor(.secondary)
                                 }
                                 Spacer()
-                                Button {
-                                    showQRForSession = session
-                                } label: {
-                                    Image(systemName: "qrcode")
-                                        .font(.footnote)
+                                if session.status == .pending {
+                                    Button {
+                                        showQRForSession = session
+                                    } label: {
+                                        Image(systemName: "qrcode")
+                                            .font(.footnote)
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
                                     .foregroundColor(Color(UIColor.tertiaryLabel))
@@ -113,7 +115,7 @@ struct SessionsView: View {
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
-    .sheet(item: $showQRForSession) { sess in
+        .sheet(item: $showQRForSession) { sess in
             NavigationView {
                 VStack(spacing: 24) {
                     Text(sess.displayName)
