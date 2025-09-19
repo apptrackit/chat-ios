@@ -15,6 +15,7 @@ class ChatManager: NSObject, ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var roomId: String = ""
     @Published var isP2PConnected: Bool = false
+    @Published var connectionPath: ConnectionPath = .unknown
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
     // Sessions (frontend)
     @Published var sessions: [ChatSession] = []
@@ -379,6 +380,7 @@ class ChatManager: NSObject, ObservableObject {
         case "peer_disconnected", "peer_left":
             // Allow WebRTC to teardown without blocking UI
             self.isP2PConnected = false
+            self.connectionPath = .unknown
             self.pcm.close()
             self.roomId = ""
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
@@ -419,9 +421,101 @@ extension ChatManager: PeerConnectionManagerDelegate {
             hadP2POnce = true
             // When P2P comes up for created session, consider as accepted
             markActiveSessionAccepted()
+            classifyConnectionPath()
         }
     }
     func pcmDidReceiveMessage(_ text: String) {
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
+    }
+}
+
+// MARK: - Connection Path Classification
+extension ChatManager {
+    enum ConnectionPath: Equatable {
+        case directLAN          // host↔host on same network
+        case directReflexive    // srflx / host mix (NAT hole-punched)
+        case relayed(server: String?) // TURN relay (server domain/ip if known)
+        case unknown
+
+        var displayName: String {
+            switch self {
+            case .directLAN: return "Direct LAN"
+            case .directReflexive: return "Direct (NAT)"
+            case .relayed(let server): return server.map { "Relayed via \($0)" } ?? "Relayed"
+            case .unknown: return "Determining…"
+            }
+        }
+        var shortLabel: String {
+            switch self {
+            case .directLAN: return "LAN"
+            case .directReflexive: return "NAT"
+            case .relayed: return "RELAY"
+            case .unknown: return "…"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .directLAN: return "wifi"
+            case .directReflexive: return "arrow.left.and.right"
+            case .relayed: return "cloud"
+            case .unknown: return "questionmark"
+            }
+        }
+        var color: String {
+            switch self {
+            case .directLAN: return "green"
+            case .directReflexive: return "teal"
+            case .relayed: return "orange"
+            case .unknown: return "gray"
+            }
+        }
+    }
+
+    private func classifyConnectionPath() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self = self else { return }
+            self.pcm.fetchStats { report in
+                // Locate selected candidate pair id
+                var pairValues: [String: Any]? = nil
+                var localCandidateId: String? = nil
+                var remoteCandidateId: String? = nil
+                for (_, stat) in report.statistics {
+                    if stat.type == "transport" { // transport may reference candidate pair
+                        if let sel = stat.values["selectedCandidatePairId"] as? String,
+                           let pair = report.statistics[sel]?.values { pairValues = pair }
+                    }
+                    if stat.type == "candidate-pair" { // fallback
+                        if let nominated = stat.values["nominated"] as? String, nominated == "true" {
+                            pairValues = stat.values
+                        }
+                    }
+                }
+                if let pv = pairValues {
+                    localCandidateId = pv["localCandidateId"] as? String
+                    remoteCandidateId = pv["remoteCandidateId"] as? String
+                }
+                func candidateInfo(_ id: String?) -> (type: String?, ip: String?, url: String?) {
+                    guard let id = id, let stat = report.statistics[id] else { return (nil,nil,nil) }
+                    let type = stat.values["candidateType"] as? String
+                    let ip = (stat.values["ip"] as? String) ?? (stat.values["address"] as? String)
+                    let url = stat.values["url"] as? String
+                    return (type, ip, url)
+                }
+                let local = candidateInfo(localCandidateId)
+                let remote = candidateInfo(remoteCandidateId)
+                let allTypes = [local.type, remote.type].compactMap { $0 }
+                if allTypes.contains("relay") {
+                    // Try to extract server host from url (turn:domain:port)
+                    let server = (local.url ?? remote.url)?.split(separator: ":").dropFirst().first.map { String($0) }
+                    self.connectionPath = .relayed(server: server)
+                } else if allTypes.allSatisfy({ $0 == "host" }) {
+                    self.connectionPath = .directLAN
+                } else if allTypes.allSatisfy({ $0 == "host" || $0 == "srflx" }) {
+                    self.connectionPath = .directReflexive
+                } else {
+                    self.connectionPath = .unknown
+                }
+            }
+        }
     }
 }
