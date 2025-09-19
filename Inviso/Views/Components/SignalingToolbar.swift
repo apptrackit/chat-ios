@@ -359,7 +359,7 @@ struct SignalingToolbar: ViewModifier {
                         }
                     }
                 } label: {
-                    Image(systemName: "person.crop.circle.badge.plus")
+                    Image(systemName: "qrcode.viewfinder")
                 }
                 .accessibilityLabel("Join")
 
