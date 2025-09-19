@@ -42,15 +42,10 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
         .navigationBarBackButtonHidden(true)
-    .toolbar {
+        .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showLeaveConfirm = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                        Text("Leave")
-                    }
+                Button { showLeaveConfirm = true } label: {
+                    HStack(spacing: 4) { Image(systemName: "chevron.left"); Text("Leave") }
                 }
                 .accessibilityLabel("Back")
             }
@@ -59,7 +54,14 @@ struct ChatView: View {
                     .fill(chat.isP2PConnected ? Color.green : Color.yellow)
                     .frame(width: 10, height: 10)
                     .accessibilityLabel(chat.isP2PConnected ? "Connected" : "Waiting")
-                    .allowsHitTesting(false)
+                    .accessibilityHint("P2P signaling state")
+            }
+        }
+        .overlay(alignment: .top) {
+            if chat.isP2PConnected {
+                connectionCard
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .alert("Leave chat?", isPresented: $showLeaveConfirm) {
@@ -114,6 +116,61 @@ struct ChatView: View {
             // Pending session: just leave view; keep session waiting
         } else {
             chat.leave(userInitiated: true)
+        }
+    }
+
+    private var connectionCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: iconForPath(chat.connectionPath))
+                .foregroundColor(colorForPath(chat.connectionPath))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(chat.connectionPath.displayName)
+                    .font(.caption.weight(.semibold))
+                Text(latencyHint)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+            Text(chat.connectionPath.shortLabel)
+                .font(.caption2.weight(.bold))
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .background(Capsule().fill(colorForPath(chat.connectionPath).opacity(0.15)))
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(colorForPath(chat.connectionPath).opacity(0.25), lineWidth: 1)
+        )
+        .padding(.horizontal)
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Connection path: \(chat.connectionPath.displayName)")
+    }
+
+    private func iconForPath(_ path: ChatManager.ConnectionPath) -> String {
+        switch path {
+        case .directLAN: return "wifi"
+        case .directReflexive: return "arrow.left.and.right"
+        case .relayed: return "cloud"
+        case .unknown: return "questionmark"
+        }
+    }
+    private func colorForPath(_ path: ChatManager.ConnectionPath) -> Color {
+        switch path {
+        case .directLAN: return .green
+        case .directReflexive: return .teal
+        case .relayed: return .orange
+        case .unknown: return .gray
+        }
+    }
+    private var latencyHint: String {
+        switch chat.connectionPath {
+        case .directLAN: return "Lowest latency"
+        case .directReflexive: return "NAT optimized"
+        case .relayed: return "Relayed (higher latency)"
+        case .unknown: return "Resolving path…"
         }
     }
 }

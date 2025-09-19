@@ -117,6 +117,13 @@ final class PeerConnectionManager: NSObject {
     }
 
     private func flushPending() { guard let pc = pc else { return }; pending.forEach { pc.add($0) }; pending.removeAll() }
+
+    // Expose stats for classifying connection path (direct vs relayed)
+    func fetchStats(_ completion: @escaping (RTCStatisticsReport) -> Void) {
+        pc?.statistics(completionHandler: { report in
+            completion(report)
+        })
+    }
 }
 
 extension PeerConnectionManager: RTCPeerConnectionDelegate {

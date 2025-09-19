@@ -11,6 +11,7 @@ struct SessionsView: View {
     @State private var renameText: String = ""
     @State private var isVisible = false
     @State private var ticker = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
+    @State private var showQRForSession: ChatSession? = nil
 
     var body: some View {
         content
@@ -24,6 +25,7 @@ struct SessionsView: View {
             )
             .navigationTitle("Sessions")
             .signalingToolbar()
+            // Removed global scan button – scanning now only in join code context
             .onAppear {
                 isVisible = true
                 if chat.connectionStatus == .disconnected { chat.connect() }
@@ -77,6 +79,15 @@ struct SessionsView: View {
                                         .foregroundColor(.secondary)
                                 }
                                 Spacer()
+                                if session.status == .pending {
+                                    Button {
+                                        showQRForSession = session
+                                    } label: {
+                                        Image(systemName: "qrcode")
+                                            .font(.footnote)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
                                     .foregroundColor(Color(UIColor.tertiaryLabel))
@@ -104,6 +115,22 @@ struct SessionsView: View {
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
+        .sheet(item: $showQRForSession) { sess in
+            NavigationView {
+                VStack(spacing: 24) {
+                    Text(sess.displayName)
+                        .font(.headline)
+                    QRCodeView(value: "inviso://join/" + sess.code, size: 240)
+                        .padding()
+                    Text("inviso://join/" + sess.code)
+                        .font(.footnote.monospaced())
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding()
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showQRForSession = nil } } }
+            }
+        }
     }
 
     private func statusDot(for s: ChatSession) -> some View {

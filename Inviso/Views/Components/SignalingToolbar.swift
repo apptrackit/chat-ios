@@ -19,10 +19,55 @@ struct SignalingToolbar: ViewModifier {
     @State private var showCreateResult = false
     @State private var createdCode: String = ""
     @State private var navigateToChatAfterCreate = false
+    // QR Scan for join code
+    @State private var showJoinScanner = false
+    // QR sheet for newly created room
+    @State private var showCreatedQRCode = false
 
     func body(content: Content) -> some View {
         ZStack {
             content
+            if let code = chat.pendingDeepLinkCode {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                VStack(spacing: 16) {
+                    Text("Join via Link")
+                        .font(.headline)
+                    Text("Code: \(code)")
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    Text("You opened a link containing a join code. Confirm to proceed.")
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                    HStack(spacing: 24) {
+                        Button("Cancel") {
+                            withAnimation(.spring()) { chat.cancelPendingDeepLinkJoin() }
+                        }
+                        Button {
+                            chat.confirmPendingDeepLinkJoin()
+                        } label: {
+                            Label("Join", systemImage: "arrow.right.circle.fill")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: 320)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.15))
+                )
+                .padding()
+                .transition(.scale.combined(with: .opacity))
+            }
             if isExpanded {
                 Color.clear
                     .ignoresSafeArea()
@@ -118,6 +163,12 @@ struct SignalingToolbar: ViewModifier {
                         .disabled(joinCode.count != 6)
                         .buttonStyle(.glass)
                         .tint(joinCode.count == 6 ? .green : .gray)
+                        Button {
+                            showJoinScanner = true
+                        } label: {
+                            Image(systemName: "qrcode.viewfinder")
+                        }
+                        .accessibilityLabel("Scan QR code")
                     }
                 }
                 .padding(16)
@@ -255,6 +306,14 @@ struct SignalingToolbar: ViewModifier {
                         }
                         .buttonStyle(.glass)
                         .padding(.top, 6)
+                        Button {
+                            showCreatedQRCode = true
+                        } label: {
+                            Label("Show QR", systemImage: "qrcode")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.top, 2)
 
             Button("Done") {
                             withAnimation(.spring()) {
@@ -285,6 +344,32 @@ struct SignalingToolbar: ViewModifier {
         }
         .onDisappear { isExpanded = false }
         .onChange(of: scenePhase) { _ in isExpanded = false }
+        .sheet(isPresented: $showJoinScanner) {
+            QRCodeScannerContainer { code in
+                if code.lowercased().hasPrefix("inviso://join/") {
+                    if let c = code.split(separator: "/").last, c.count == 6 { joinCode = String(c); showJoinScanner = false }
+                }
+            }
+        }
+        .sheet(isPresented: $showCreatedQRCode) {
+            VStack(spacing: 16) {
+                Text("Share Join Code")
+                    .font(.headline)
+                if createdCode.count == 6 {
+                    QRCodeView(value: "inviso://join/\(createdCode)")
+                        .frame(width: 220, height: 220)
+                        .padding()
+                    Text(createdCode)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .padding(.bottom, 4)
+                } else {
+                    ProgressView()
+                }
+                Button("Close") { showCreatedQRCode = false }
+                    .buttonStyle(.glass)
+            }
+            .padding()
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 NavigationLink(destination: SettingsView()) {
@@ -303,7 +388,7 @@ struct SignalingToolbar: ViewModifier {
                         }
                     }
                 } label: {
-                    Image(systemName: "person.crop.circle.badge.plus")
+                    Image(systemName: "qrcode.viewfinder")
                 }
                 .accessibilityLabel("Join")
 

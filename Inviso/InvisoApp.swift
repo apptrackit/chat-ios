@@ -12,8 +12,13 @@ struct InvisoApp: App {
     @StateObject private var chat = ChatManager()
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(chat)
+            SecuredContentView {
+                ContentView()
+                    .environmentObject(chat)
+                    .onOpenURL { url in
+                        chat.handleIncomingURL(url)
+                    }
+            }
         }
     }
 }
