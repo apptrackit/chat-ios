@@ -111,6 +111,46 @@ class ChatManager: NSObject, ObservableObject {
         persistSessions()
     }
 
+    // MARK: - Deep Link Handling (inviso://join/<code>)
+    /// Entry point for handling a custom URL of the form inviso://join/<6-digit-code>
+    /// Accepts the code, creates/updates a session, and attempts to join if room resolved.
+    func handleIncomingURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "inviso" else { return }
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Expect path starts with "join" then code component
+        let parts = path.split(separator: "/")
+        guard parts.count == 2, parts[0].lowercased() == "join" else { return }
+        let code = String(parts[1])
+        handleJoinCodeFromDeepLink(code: code)
+    }
+
+    private func handleJoinCodeFromDeepLink(code: String) {
+        // Validate 6-digit pattern
+        guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return }
+        // If already have an accepted or pending session with this code, select it
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+            activeSessionId = existing.id
+            // If already accepted and have roomId, join room automatically
+            if let rid = existing.roomId { joinRoom(roomId: rid) }
+            return
+        }
+        // Otherwise attempt accept flow
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let roomId = await self.acceptJoinCode(code) {
+                let session = self.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
+                self.joinRoom(roomId: roomId)
+                self.activeSessionId = session.id
+            } else {
+                // Create a pending session placeholder so UI can show waiting state
+                let pending = ChatSession(name: nil, code: code, createdAt: Date(), expiresAt: Date().addingTimeInterval(5*60), status: .pending, isCreatedByMe: false)
+                self.sessions.insert(pending, at: 0)
+                self.activeSessionId = pending.id
+                self.persistSessions()
+            }
+        }
+    }
+
     // MARK: - Sessions (frontend only)
     func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
         let expires: Date? = minutes > 0 ? Date().addingTimeInterval(TimeInterval(minutes) * 60.0) : nil

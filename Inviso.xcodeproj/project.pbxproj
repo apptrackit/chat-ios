@@ -16,9 +16,22 @@
 		49AE6BF72E7488960076150B /* Inviso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inviso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		49365F122E7CD2B0009DD60D /* Exceptions for "Inviso" folder in "Inviso" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 49AE6BF62E7488960076150B /* Inviso */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		49AE6BF92E7488960076150B /* Inviso */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				49365F122E7CD2B0009DD60D /* Exceptions for "Inviso" folder in "Inviso" target */,
+			);
 			path = Inviso;
 			sourceTree = "<group>";
 		};
@@ -269,6 +282,9 @@
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Inviso/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scanning QR codes to join sessions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -302,6 +318,9 @@
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Inviso/Info.plist;
+				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scanning QR codes to join sessions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

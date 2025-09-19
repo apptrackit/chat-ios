@@ -14,6 +14,7 @@ struct PendingSessionView: View {
     @State private var ticker = Timer.publish(every: 5.0, on: .main, in: .common).autoconnect()
     @State private var showRenameAlert = false
     @State private var renameText: String = ""
+    @State private var showQR = false
 
     var body: some View {
         ZStack {
@@ -43,6 +44,15 @@ struct PendingSessionView: View {
                             .font(.body.weight(.semibold))
                     }
                     .buttonStyle(.glass)
+                    HStack(spacing: 12) {
+                        Button {
+                            showQR = true
+                        } label: {
+                            Label("QR", systemImage: "qrcode")
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                    }
                 }
                 .padding(20)
                 .background(
@@ -96,6 +106,22 @@ struct PendingSessionView: View {
                 chat.renameSession(session, newName: renameText.isEmpty ? nil : renameText)
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showQR) {
+            NavigationView {
+                VStack(spacing: 24) {
+                    Text("Scan to Join")
+                        .font(.headline)
+                    QRCodeView(value: "inviso://join/" + session.code, size: 240)
+                        .padding()
+                    Text("inviso://join/" + session.code)
+                        .font(.footnote.monospaced())
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding()
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showQR = false } } }
+            }
         }
     }
 

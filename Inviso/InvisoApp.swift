@@ -15,6 +15,9 @@ struct InvisoApp: App {
             SecuredContentView {
                 ContentView()
                     .environmentObject(chat)
+                    .onOpenURL { url in
+                        chat.handleIncomingURL(url)
+                    }
             }
         }
     }

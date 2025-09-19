@@ -19,6 +19,8 @@ struct SignalingToolbar: ViewModifier {
     @State private var showCreateResult = false
     @State private var createdCode: String = ""
     @State private var navigateToChatAfterCreate = false
+    // QR Scan for join code
+    @State private var showJoinScanner = false
 
     func body(content: Content) -> some View {
         ZStack {
@@ -118,6 +120,12 @@ struct SignalingToolbar: ViewModifier {
                         .disabled(joinCode.count != 6)
                         .buttonStyle(.glass)
                         .tint(joinCode.count == 6 ? .green : .gray)
+                        Button {
+                            showJoinScanner = true
+                        } label: {
+                            Image(systemName: "qrcode.viewfinder")
+                        }
+                        .accessibilityLabel("Scan QR code")
                     }
                 }
                 .padding(16)
@@ -285,6 +293,13 @@ struct SignalingToolbar: ViewModifier {
         }
         .onDisappear { isExpanded = false }
         .onChange(of: scenePhase) { _ in isExpanded = false }
+        .sheet(isPresented: $showJoinScanner) {
+            QRCodeScannerContainer { code in
+                if code.lowercased().hasPrefix("inviso://join/") {
+                    if let c = code.split(separator: "/").last, c.count == 6 { joinCode = String(c); showJoinScanner = false }
+                }
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 NavigationLink(destination: SettingsView()) {
