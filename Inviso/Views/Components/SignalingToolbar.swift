@@ -21,6 +21,8 @@ struct SignalingToolbar: ViewModifier {
     @State private var navigateToChatAfterCreate = false
     // QR Scan for join code
     @State private var showJoinScanner = false
+    // QR sheet for newly created room
+    @State private var showCreatedQRCode = false
 
     func body(content: Content) -> some View {
         ZStack {
@@ -304,6 +306,14 @@ struct SignalingToolbar: ViewModifier {
                         }
                         .buttonStyle(.glass)
                         .padding(.top, 6)
+                        Button {
+                            showCreatedQRCode = true
+                        } label: {
+                            Label("Show QR", systemImage: "qrcode")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.top, 2)
 
             Button("Done") {
                             withAnimation(.spring()) {
@@ -340,6 +350,25 @@ struct SignalingToolbar: ViewModifier {
                     if let c = code.split(separator: "/").last, c.count == 6 { joinCode = String(c); showJoinScanner = false }
                 }
             }
+        }
+        .sheet(isPresented: $showCreatedQRCode) {
+            VStack(spacing: 16) {
+                Text("Share Join Code")
+                    .font(.headline)
+                if createdCode.count == 6 {
+                    QRCodeView(value: "inviso://join/\(createdCode)")
+                        .frame(width: 220, height: 220)
+                        .padding()
+                    Text(createdCode)
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .padding(.bottom, 4)
+                } else {
+                    ProgressView()
+                }
+                Button("Close") { showCreatedQRCode = false }
+                    .buttonStyle(.glass)
+            }
+            .padding()
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
