@@ -25,6 +25,47 @@ struct SignalingToolbar: ViewModifier {
     func body(content: Content) -> some View {
         ZStack {
             content
+            if let code = chat.pendingDeepLinkCode {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                VStack(spacing: 16) {
+                    Text("Join via Link")
+                        .font(.headline)
+                    Text("Code: \(code)")
+                        .font(.system(.title3, design: .monospaced).weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                    Text("You opened a link containing a join code. Confirm to proceed.")
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                    HStack(spacing: 24) {
+                        Button("Cancel") {
+                            withAnimation(.spring()) { chat.cancelPendingDeepLinkJoin() }
+                        }
+                        Button {
+                            chat.confirmPendingDeepLinkJoin()
+                        } label: {
+                            Label("Join", systemImage: "arrow.right.circle.fill")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: 320)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.15))
+                )
+                .padding()
+                .transition(.scale.combined(with: .opacity))
+            }
             if isExpanded {
                 Color.clear
                     .ignoresSafeArea()

@@ -31,6 +31,8 @@ class ChatManager: NSObject, ObservableObject {
     private var pendingJoinRoomId: String?
     private var suppressReconnectOnce = false
     private var hadP2POnce = false
+    // Deep link join waiting confirmation
+    @Published var pendingDeepLinkCode: String? = nil
 
     override init() {
         super.init()
@@ -116,12 +118,25 @@ class ChatManager: NSObject, ObservableObject {
     /// Accepts the code, creates/updates a session, and attempts to join if room resolved.
     func handleIncomingURL(_ url: URL) {
         guard url.scheme?.lowercased() == "inviso" else { return }
-        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        // Expect path starts with "join" then code component
-        let parts = path.split(separator: "/")
-        guard parts.count == 2, parts[0].lowercased() == "join" else { return }
-        let code = String(parts[1])
-        handleJoinCodeFromDeepLink(code: code)
+        // Support both forms:
+        // 1) inviso://join/123456  -> host = "join", path = "/123456"
+        // 2) inviso://join/123456 (previous parser expected path components ["join","123456"] if constructed differently)
+        // First: host style (most common when user scans QR with iOS Camera)
+        if let host = url.host?.lowercased(), host == "join" {
+            let codeCandidate = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            if !codeCandidate.isEmpty { queueDeepLinkCode(codeCandidate); return }
+        }
+        // Fallback: path starts with join
+        let trimmedPath = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let parts = trimmedPath.split(separator: "/")
+        if parts.count == 2, parts[0].lowercased() == "join" {
+            queueDeepLinkCode(String(parts[1]))
+        }
+    }
+
+    private func queueDeepLinkCode(_ code: String) {
+        guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return }
+        pendingDeepLinkCode = code
     }
 
     private func handleJoinCodeFromDeepLink(code: String) {
@@ -148,8 +163,17 @@ class ChatManager: NSObject, ObservableObject {
                 self.activeSessionId = pending.id
                 self.persistSessions()
             }
+            self.pendingDeepLinkCode = nil
         }
     }
+
+    // Called by UI after user confirms deep link join
+    func confirmPendingDeepLinkJoin() {
+        guard let code = pendingDeepLinkCode else { return }
+        handleJoinCodeFromDeepLink(code: code)
+    }
+
+    func cancelPendingDeepLinkJoin() { pendingDeepLinkCode = nil }
 
     // MARK: - Sessions (frontend only)
     func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
