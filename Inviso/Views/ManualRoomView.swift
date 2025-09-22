@@ -21,7 +21,7 @@ struct ManualRoomView: View {
                         Label(chat.roomId.isEmpty ? "Join" : "Leave", systemImage: chat.roomId.isEmpty ? "arrow.right.circle" : "xmark.circle")
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(roomId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.roomId.isEmpty)
+                    .disabled( (roomId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.roomId.isEmpty) || (chat.connectionStatus != .connected && chat.roomId.isEmpty) )
                 }
             }
             .padding(.horizontal)
@@ -70,6 +70,7 @@ struct ManualRoomView: View {
         if chat.roomId.isEmpty {
             let id = roomId.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !id.isEmpty else { return }
+            guard chat.connectionStatus == .connected else { return }
             chat.joinRoom(roomId: id)
             // Navigate to ChatView immediately; it will show waiting state
             goToChat = true

@@ -58,15 +58,14 @@ struct SessionsView: View {
                 List {
                     ForEach(chat.sessions, id: \.id) { session in
                         Button {
+                            // Block interactions that cause network join when offline
+                            guard chat.connectionStatus == .connected else { return }
                             chat.selectSession(session)
                             if session.status == .pending {
                                 goToPending = true
-                            } else {
-                                // If accepted and has roomId, join
-                                if let rid = session.roomId {
-                                    chat.joinRoom(roomId: rid)
-                                    goToChat = true
-                                }
+                            } else if let rid = session.roomId { // accepted
+                                chat.joinRoom(roomId: rid)
+                                goToChat = true
                             }
                         } label: {
                             HStack(spacing: 12) {
@@ -94,6 +93,7 @@ struct SessionsView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .disabled(chat.connectionStatus != .connected && session.status != .pending)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 chat.removeSession(session)
