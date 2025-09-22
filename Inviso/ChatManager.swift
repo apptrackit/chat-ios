@@ -18,6 +18,7 @@ class ChatManager: NSObject, ObservableObject {
     @Published var connectionPath: ConnectionPath = .unknown
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
     @Published var remotePeerPresent: Bool = false // Tracks whether the remote peer is currently in the room (P2P established at least once and not yet left)
+    @Published var isOnline: Bool = false // True only while signaling WebSocket is connected
     // Sessions (frontend)
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
@@ -66,12 +67,8 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     func joinRoom(roomId: String) {
+    if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
     if isEphemeral { messages.removeAll() }
-        if connectionStatus != .connected {
-            pendingJoinRoomId = roomId
-            connect()
-            return
-        }
         self.roomId = roomId
         signaling.send(["type": "join_room", "roomId": roomId])
     }
@@ -174,6 +171,7 @@ class ChatManager: NSObject, ObservableObject {
     // Called by UI after user confirms deep link join
     func confirmPendingDeepLinkJoin() {
         guard let code = pendingDeepLinkCode else { return }
+    guard connectionStatus == .connected else { return }
         handleJoinCodeFromDeepLink(code: code)
     }
 
@@ -181,6 +179,11 @@ class ChatManager: NSObject, ObservableObject {
 
     // MARK: - Sessions (frontend only)
     func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
+        // Prevent creation while offline: simply return a placeholder that won't be persisted/used.
+        guard connectionStatus == .connected else {
+            // Could surface a UI error; here we no-op and return a transient object
+            return ChatSession(name: name, code: code, createdAt: Date(), expiresAt: nil, status: .pending, isCreatedByMe: true)
+        }
         let expires: Date? = minutes > 0 ? Date().addingTimeInterval(TimeInterval(minutes) * 60.0) : nil
         let session = ChatSession(name: name, code: code, createdAt: Date(), expiresAt: expires, status: .pending, isCreatedByMe: true)
         sessions.insert(session, at: 0)
@@ -300,6 +303,8 @@ class ChatManager: NSObject, ObservableObject {
 
     // MARK: - Polling and housekeeping
     func pollPendingAndValidateRooms() {
+        // If we're not online, skip polling to avoid falsely closing rooms due to transient offline/unreachable state.
+        guard connectionStatus == .connected else { return }
         Task {
             // 1) For each pending session, check acceptance
             for i in sessions.indices {
@@ -316,11 +321,16 @@ class ChatManager: NSObject, ObservableObject {
             for i in sessions.indices {
                 let s = sessions[i]
                 if s.status == .accepted, let rid = s.roomId {
-                    let exists = await getRoom(roomId: rid) != nil
-                    if !exists {
+                    switch await getRoomStatus(rid) {
+                    case .exists:
+                        break // all good
+                    case .notFound:
                         sessions[i].status = .closed
                         sessions[i].roomId = nil
                         persistSessions()
+                    case .unreachable:
+                        // Do nothing; keep current state. We'll re-validate when back online.
+                        break
                     }
                 }
             }
@@ -405,12 +415,20 @@ extension ChatManager: SignalingClientDelegate {
     func signalingConnected(clientId: String) {
         self.clientId = clientId
         connectionStatus = .connected
+        isOnline = true
     // When WS connects, also validate backend state (pendings/rooms)
     pollPendingAndValidateRooms()
-        if let pending = pendingJoinRoomId { pendingJoinRoomId = nil; joinRoom(roomId: pending) }
+        // Previous behavior auto-joined pending room. Now we only auto-join if the user was online when initiating.
+        if let pending = pendingJoinRoomId {
+            pendingJoinRoomId = nil
+            joinRoom(roomId: pending)
+        }
     }
     func signalingMessage(_ json: [String : Any]) { handleServerMessage(json) }
-    func signalingClosed() { connectionStatus = .disconnected }
+    func signalingClosed() {
+        connectionStatus = .disconnected
+        isOnline = false
+    }
 }
 
 extension ChatManager: PeerConnectionManagerDelegate {
@@ -525,6 +543,37 @@ extension ChatManager {
                     self.connectionPath = .unknown
                 }
             }
+        }
+    }
+}
+
+// MARK: - Room existence status (avoid false closure offline)
+extension ChatManager {
+    private enum RoomStatusResult { case exists, notFound, unreachable }
+
+    private func getRoomStatus(_ roomId: String) async -> RoomStatusResult {
+        // If offline, treat as unreachable immediately
+        guard connectionStatus == .connected else { return .unreachable }
+        guard var comps = URLComponents(url: apiBase.appendingPathComponent("/api/rooms"), resolvingAgainstBaseURL: false) else { return .unreachable }
+        comps.queryItems = [URLQueryItem(name: "roomid", value: roomId)]
+        guard let url = comps.url else { return .unreachable }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard let http = resp as? HTTPURLResponse else { return .unreachable }
+            if http.statusCode == 200 {
+                // Basic validation that payload has expected keys
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], json["client1"] != nil {
+                    return .exists
+                } else {
+                    return .exists // Consider 200 as exists even if parsing partial
+                }
+            } else if http.statusCode == 404 {
+                return .notFound
+            } else {
+                return .unreachable
+            }
+        } catch {
+            return .unreachable
         }
     }
 }

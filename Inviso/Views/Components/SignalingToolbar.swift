@@ -380,28 +380,27 @@ struct SignalingToolbar: ViewModifier {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 Button {
                     withAnimation(.spring()) {
-                        if isExpanded {
-                            showJoinPopup = true
-                            isExpanded = false
-                        } else {
-                            isExpanded = true
-                        }
+            guard chat.connectionStatus == .connected else { return }
+            if isExpanded { showJoinPopup = true; isExpanded = false } else { isExpanded = true }
                     }
                 } label: {
                     Image(systemName: "qrcode.viewfinder")
                 }
                 .accessibilityLabel("Join")
+        .disabled(chat.connectionStatus != .connected)
 
-                if isExpanded {
+        if isExpanded {
                     Button {
                         withAnimation(.spring()) {
-                            showCreatePopup = true
-                            isExpanded = false
+                guard chat.connectionStatus == .connected else { return }
+                showCreatePopup = true
+                isExpanded = false
                         }
                     } label: {
                         Image(systemName: "plus")
                     }
                     .accessibilityLabel("Create")
+            .disabled(chat.connectionStatus != .connected)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
