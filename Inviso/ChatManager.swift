@@ -17,13 +17,15 @@ class ChatManager: NSObject, ObservableObject {
     @Published var isP2PConnected: Bool = false
     @Published var connectionPath: ConnectionPath = .unknown
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
+    @Published var remotePeerPresent: Bool = false // Tracks whether the remote peer is currently in the room (P2P established at least once and not yet left)
+    @Published var isOnline: Bool = false // True only while signaling WebSocket is connected
     // Sessions (frontend)
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
 
-    // Components
-    private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
-    private let apiBase = URL(string: "https://chat.ballabotond.com")!
+    // Components (dynamic server config)
+    private var signaling: SignalingClient
+    private var apiBase: URL { URL(string: "https://\(ServerConfig.shared.host)")! }
     private let pcm = PeerConnectionManager()
 
     // State
@@ -36,8 +38,9 @@ class ChatManager: NSObject, ObservableObject {
     @Published var pendingDeepLinkCode: String? = nil
 
     override init() {
-        super.init()
-        signaling.delegate = self
+    self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+    super.init()
+    signaling.delegate = self
         pcm.delegate = self
         loadSessions()
     }
@@ -57,19 +60,33 @@ class ChatManager: NSObject, ObservableObject {
         messages.removeAll()
         roomId = ""
         isP2PConnected = false
+    remotePeerPresent = false
         connectionStatus = .disconnected
         clientId = nil
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
     }
 
+    // Change server host at runtime. Disconnects current signaling and rebuilds client.
+    func changeServerHost(to newHostRaw: String) {
+        let oldHost = ServerConfig.shared.host
+        ServerConfig.shared.updateHost(newHostRaw)
+        guard ServerConfig.shared.host != oldHost else { return }
+        // Fully disconnect current signaling + P2P
+        signaling.disconnect()
+        pcm.close()
+        isP2PConnected = false
+        remotePeerPresent = false
+        connectionStatus = .disconnected
+        clientId = nil
+        // Recreate signaling client with new host
+        signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+        signaling.delegate = self
+    }
+
     func joinRoom(roomId: String) {
+    if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
     if isEphemeral { messages.removeAll() }
-        if connectionStatus != .connected {
-            pendingJoinRoomId = roomId
-            connect()
-            return
-        }
         self.roomId = roomId
         signaling.send(["type": "join_room", "roomId": roomId])
     }
@@ -81,6 +98,7 @@ class ChatManager: NSObject, ObservableObject {
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
+    remotePeerPresent = false
         // Send leave to server and clear local room immediately.
         isAwaitingLeaveAck = true
         signaling.send(["type": "leave_room"])        
@@ -171,6 +189,7 @@ class ChatManager: NSObject, ObservableObject {
     // Called by UI after user confirms deep link join
     func confirmPendingDeepLinkJoin() {
         guard let code = pendingDeepLinkCode else { return }
+    guard connectionStatus == .connected else { return }
         handleJoinCodeFromDeepLink(code: code)
     }
 
@@ -178,6 +197,11 @@ class ChatManager: NSObject, ObservableObject {
 
     // MARK: - Sessions (frontend only)
     func createSession(name: String?, minutes: Int, code: String) -> ChatSession {
+        // Prevent creation while offline: simply return a placeholder that won't be persisted/used.
+        guard connectionStatus == .connected else {
+            // Could surface a UI error; here we no-op and return a transient object
+            return ChatSession(name: name, code: code, createdAt: Date(), expiresAt: nil, status: .pending, isCreatedByMe: true)
+        }
         let expires: Date? = minutes > 0 ? Date().addingTimeInterval(TimeInterval(minutes) * 60.0) : nil
         let session = ChatSession(name: name, code: code, createdAt: Date(), expiresAt: expires, status: .pending, isCreatedByMe: true)
         sessions.insert(session, at: 0)
@@ -297,6 +321,8 @@ class ChatManager: NSObject, ObservableObject {
 
     // MARK: - Polling and housekeeping
     func pollPendingAndValidateRooms() {
+        // If we're not online, skip polling to avoid falsely closing rooms due to transient offline/unreachable state.
+        guard connectionStatus == .connected else { return }
         Task {
             // 1) For each pending session, check acceptance
             for i in sessions.indices {
@@ -313,11 +339,16 @@ class ChatManager: NSObject, ObservableObject {
             for i in sessions.indices {
                 let s = sessions[i]
                 if s.status == .accepted, let rid = s.roomId {
-                    let exists = await getRoom(roomId: rid) != nil
-                    if !exists {
+                    switch await getRoomStatus(rid) {
+                    case .exists:
+                        break // all good
+                    case .notFound:
                         sessions[i].status = .closed
                         sessions[i].roomId = nil
                         persistSessions()
+                    case .unreachable:
+                        // Do nothing; keep current state. We'll re-validate when back online.
+                        break
                     }
                 }
             }
@@ -350,7 +381,7 @@ class ChatManager: NSObject, ObservableObject {
             hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
-            pcm.createPeerConnection(isInitiator: isInitiator)
+            pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
             if isInitiator {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.pcm.createOffer { sdp in
@@ -362,7 +393,7 @@ class ChatManager: NSObject, ObservableObject {
         case "webrtc_offer":
             guard let sdp = json["sdp"] as? String else { return }
             let offer = RTCSessionDescription(type: .offer, sdp: sdp)
-            if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false) }
+            if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false, customHost: ServerConfig.shared.host) }
             self.pcm.setRemoteOfferAndCreateAnswer(offer) { answer in
                 guard let answer = answer else { return }
                 self.signaling.send(["type": "webrtc_answer", "sdp": answer.sdp])
@@ -382,7 +413,12 @@ class ChatManager: NSObject, ObservableObject {
             self.isP2PConnected = false
             self.connectionPath = .unknown
             self.pcm.close()
-            self.roomId = ""
+            // IMPORTANT: Do NOT clear roomId here. We still consider ourselves logically in the room
+            // until the user explicitly leaves. Clearing it prevented a later explicit leave() call
+            // from sending the leave_room message (guard !roomId.isEmpty early-return), causing the
+            // server to keep this client in the room and auto-reconnect when the other peer rejoined.
+            // The UI can distinguish waiting state via isP2PConnected/remotePeerPresent.
+            self.remotePeerPresent = false
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
         case "left_room":
             self.isAwaitingLeaveAck = false
@@ -397,12 +433,20 @@ extension ChatManager: SignalingClientDelegate {
     func signalingConnected(clientId: String) {
         self.clientId = clientId
         connectionStatus = .connected
+        isOnline = true
     // When WS connects, also validate backend state (pendings/rooms)
     pollPendingAndValidateRooms()
-        if let pending = pendingJoinRoomId { pendingJoinRoomId = nil; joinRoom(roomId: pending) }
+        // Previous behavior auto-joined pending room. Now we only auto-join if the user was online when initiating.
+        if let pending = pendingJoinRoomId {
+            pendingJoinRoomId = nil
+            joinRoom(roomId: pending)
+        }
     }
     func signalingMessage(_ json: [String : Any]) { handleServerMessage(json) }
-    func signalingClosed() { connectionStatus = .disconnected }
+    func signalingClosed() {
+        connectionStatus = .disconnected
+        isOnline = false
+    }
 }
 
 extension ChatManager: PeerConnectionManagerDelegate {
@@ -422,6 +466,7 @@ extension ChatManager: PeerConnectionManagerDelegate {
             // When P2P comes up for created session, consider as accepted
             markActiveSessionAccepted()
             classifyConnectionPath()
+            remotePeerPresent = true
         }
     }
     func pcmDidReceiveMessage(_ text: String) {
@@ -516,6 +561,37 @@ extension ChatManager {
                     self.connectionPath = .unknown
                 }
             }
+        }
+    }
+}
+
+// MARK: - Room existence status (avoid false closure offline)
+extension ChatManager {
+    private enum RoomStatusResult { case exists, notFound, unreachable }
+
+    private func getRoomStatus(_ roomId: String) async -> RoomStatusResult {
+        // If offline, treat as unreachable immediately
+        guard connectionStatus == .connected else { return .unreachable }
+        guard var comps = URLComponents(url: apiBase.appendingPathComponent("/api/rooms"), resolvingAgainstBaseURL: false) else { return .unreachable }
+        comps.queryItems = [URLQueryItem(name: "roomid", value: roomId)]
+        guard let url = comps.url else { return .unreachable }
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard let http = resp as? HTTPURLResponse else { return .unreachable }
+            if http.statusCode == 200 {
+                // Basic validation that payload has expected keys
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], json["client1"] != nil {
+                    return .exists
+                } else {
+                    return .exists // Consider 200 as exists even if parsing partial
+                }
+            } else if http.statusCode == 404 {
+                return .notFound
+            } else {
+                return .unreachable
+            }
+        } catch {
+            return .unreachable
         }
     }
 }

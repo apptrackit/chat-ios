@@ -8,8 +8,6 @@
 import SwiftUI
 
 struct ContentView: View {
-    // Removed global search bar
-
     var body: some View {
         if #available(iOS 18.0, *) {
             TabView {
