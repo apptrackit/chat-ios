@@ -17,6 +17,7 @@ class ChatManager: NSObject, ObservableObject {
     @Published var isP2PConnected: Bool = false
     @Published var connectionPath: ConnectionPath = .unknown
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
+    @Published var remotePeerPresent: Bool = false // Tracks whether the remote peer is currently in the room (P2P established at least once and not yet left)
     // Sessions (frontend)
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
@@ -57,6 +58,7 @@ class ChatManager: NSObject, ObservableObject {
         messages.removeAll()
         roomId = ""
         isP2PConnected = false
+    remotePeerPresent = false
         connectionStatus = .disconnected
         clientId = nil
         pendingJoinRoomId = nil
@@ -81,6 +83,7 @@ class ChatManager: NSObject, ObservableObject {
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
+    remotePeerPresent = false
         // Send leave to server and clear local room immediately.
         isAwaitingLeaveAck = true
         signaling.send(["type": "leave_room"])        
@@ -382,7 +385,12 @@ class ChatManager: NSObject, ObservableObject {
             self.isP2PConnected = false
             self.connectionPath = .unknown
             self.pcm.close()
-            self.roomId = ""
+            // IMPORTANT: Do NOT clear roomId here. We still consider ourselves logically in the room
+            // until the user explicitly leaves. Clearing it prevented a later explicit leave() call
+            // from sending the leave_room message (guard !roomId.isEmpty early-return), causing the
+            // server to keep this client in the room and auto-reconnect when the other peer rejoined.
+            // The UI can distinguish waiting state via isP2PConnected/remotePeerPresent.
+            self.remotePeerPresent = false
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
         case "left_room":
             self.isAwaitingLeaveAck = false
@@ -422,6 +430,7 @@ extension ChatManager: PeerConnectionManagerDelegate {
             // When P2P comes up for created session, consider as accepted
             markActiveSessionAccepted()
             classifyConnectionPath()
+            remotePeerPresent = true
         }
     }
     func pcmDidReceiveMessage(_ text: String) {
