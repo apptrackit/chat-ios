@@ -23,9 +23,9 @@ class ChatManager: NSObject, ObservableObject {
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
 
-    // Components
-    private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
-    private let apiBase = URL(string: "https://chat.ballabotond.com")!
+    // Components (dynamic server config)
+    private var signaling: SignalingClient
+    private var apiBase: URL { URL(string: "https://\(ServerConfig.shared.host)")! }
     private let pcm = PeerConnectionManager()
 
     // State
@@ -38,8 +38,9 @@ class ChatManager: NSObject, ObservableObject {
     @Published var pendingDeepLinkCode: String? = nil
 
     override init() {
-        super.init()
-        signaling.delegate = self
+    self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+    super.init()
+    signaling.delegate = self
         pcm.delegate = self
         loadSessions()
     }
@@ -64,6 +65,23 @@ class ChatManager: NSObject, ObservableObject {
         clientId = nil
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
+    }
+
+    // Change server host at runtime. Disconnects current signaling and rebuilds client.
+    func changeServerHost(to newHostRaw: String) {
+        let oldHost = ServerConfig.shared.host
+        ServerConfig.shared.updateHost(newHostRaw)
+        guard ServerConfig.shared.host != oldHost else { return }
+        // Fully disconnect current signaling + P2P
+        signaling.disconnect()
+        pcm.close()
+        isP2PConnected = false
+        remotePeerPresent = false
+        connectionStatus = .disconnected
+        clientId = nil
+        // Recreate signaling client with new host
+        signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+        signaling.delegate = self
     }
 
     func joinRoom(roomId: String) {
@@ -363,7 +381,7 @@ class ChatManager: NSObject, ObservableObject {
             hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
-            pcm.createPeerConnection(isInitiator: isInitiator)
+            pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
             if isInitiator {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self.pcm.createOffer { sdp in
@@ -375,7 +393,7 @@ class ChatManager: NSObject, ObservableObject {
         case "webrtc_offer":
             guard let sdp = json["sdp"] as? String else { return }
             let offer = RTCSessionDescription(type: .offer, sdp: sdp)
-            if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false) }
+            if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false, customHost: ServerConfig.shared.host) }
             self.pcm.setRemoteOfferAndCreateAnswer(offer) { answer in
                 guard let answer = answer else { return }
                 self.signaling.send(["type": "webrtc_answer", "sdp": answer.sdp])

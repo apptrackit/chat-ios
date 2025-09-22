@@ -11,7 +11,7 @@ enum AppDataReset {
 
     /// Best-effort server purge using the known API.
     static func purgeServerData(deviceId: String) async {
-        guard let url = URL(string: "https://chat.ballabotond.com/api/user/purge") else { return }
+    guard let url = URL(string: "https://\(ServerConfig.shared.host)/api/user/purge") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

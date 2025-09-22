@@ -129,8 +129,9 @@ Add this repo as a remote Swift Package and depend on target `Inviso`. Instantia
 ## 11. Configuration
 Edit inside `ChatManager`:
 ```swift
-private let signaling = SignalingClient(serverURL: "wss://chat.ballabotond.com")
-private let apiBase = URL(string: "https://chat.ballabotond.com")!
+// Now dynamically configured via ServerConfig.shared.host
+// Example: let signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+//          let apiBase = URL(string: "http://\(ServerConfig.shared.host)")!
 ```
 Change ICE servers in `PeerConnectionManager.createPeerConnection`.
 
