@@ -27,15 +27,16 @@ final class PeerConnectionManager: NSObject {
         factory = RTCPeerConnectionFactory(encoderFactory: enc, decoderFactory: dec)
     }
 
-    func createPeerConnection(isInitiator: Bool) {
+    func createPeerConnection(isInitiator: Bool, customHost: String? = nil) {
     if pc != nil { close() }
         let configuration = RTCConfiguration()
+        let host = customHost ?? ServerConfig.shared.host
         configuration.iceServers = [
             RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
             RTCIceServer(urlStrings: ["stun:stun1.l.google.com:19302"]),
-            RTCIceServer(urlStrings: ["turn:chat.ballabotond.com:3478"], username: "testuser", credential: "testpass"),
-            RTCIceServer(urlStrings: ["turn:chat.ballabotond.com:3478?transport=tcp"], username: "testuser", credential: "testpass"),
-            RTCIceServer(urlStrings: ["turns:chat.ballabotond.com:5349"], username: "testuser", credential: "testpass"),
+            RTCIceServer(urlStrings: ["turn:\(host):3478"], username: "testuser", credential: "testpass"),
+            RTCIceServer(urlStrings: ["turn:\(host):3478?transport=tcp"], username: "testuser", credential: "testpass"),
+            RTCIceServer(urlStrings: ["turns:\(host):5349"], username: "testuser", credential: "testpass"),
             RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:80"], username: "openrelayproject", credential: "openrelayproject"),
             RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:443"], username: "openrelayproject", credential: "openrelayproject"),
             RTCIceServer(urlStrings: ["turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject")

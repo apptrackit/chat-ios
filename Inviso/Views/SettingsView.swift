@@ -6,6 +6,9 @@ struct SettingsView: View {
     @State private var showResetConfirm: Bool = false
     @State private var showEraseConfirm: Bool = false
     @State private var isErasing: Bool = false
+    @ObservedObject private var serverConfig = ServerConfig.shared
+    @State private var editServerHost: String = ServerConfig.shared.host
+    @State private var showServerChangeAlert = false
 
     var body: some View {
         Form {
@@ -35,6 +38,22 @@ struct SettingsView: View {
 
             Section(header: Text("About")) {
                 HStack {
+                    Text("Server")
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Text(serverConfig.host)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Image(systemName: "pencil")
+                            .font(.caption)
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { editServerHost = serverConfig.host; showServerChangeAlert = true }
+                HStack {
                     Text("App")
                     Spacer()
                     Text("Inviso")
@@ -63,6 +82,16 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Change Server", isPresented: $showServerChangeAlert) {
+            TextField("Host", text: $editServerHost)
+            Button("Cancel", role: .cancel) {}
+            Button("Save") {
+                let newHost = editServerHost
+                chat.changeServerHost(to: newHost)
+            }
+        } message: {
+            Text("Enter server host (e.g. chat.example.com). Current: \(serverConfig.host)")
+        }
         .alert("Reset Device ID?", isPresented: $showResetConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
@@ -112,7 +141,7 @@ extension SettingsView {
     }
 
     private func purgeServer(deviceId: String) async {
-        guard let url = URL(string: "https://chat.ballabotond.com/api/user/purge") else { return }
+    guard let url = URL(string: "https://\(ServerConfig.shared.host)/api/user/purge") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
