@@ -11,6 +11,12 @@ struct SignalingToolbar: ViewModifier {
     @State private var joinCode: String = ""
     @FocusState private var joinFieldFocused: Bool
     @State private var caretBlinkOn: Bool = true
+    // Join -> Name transition state
+    @State private var showNameStep = false
+    @State private var newRoomTempName: String = ""
+    // Deep link naming state
+    @State private var showDeepLinkNameStep = false
+    @FocusState private var nameFieldFocused: Bool
     // Create flow states
     @State private var showCreatePopup = false
     @State private var roomName: String = ""
@@ -32,29 +38,60 @@ struct SignalingToolbar: ViewModifier {
                     .ignoresSafeArea()
                     .transition(.opacity)
                 VStack(spacing: 16) {
-                    Text("Join via Link")
-                        .font(.headline)
-                    Text("Code: \(code)")
-                        .font(.system(.title3, design: .monospaced).weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                    Text("You opened a link containing a join code. Confirm to proceed.")
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                    HStack(spacing: 24) {
-                        Button("Cancel") {
-                            withAnimation(.spring()) { chat.cancelPendingDeepLinkJoin() }
+                    if !showDeepLinkNameStep {
+                        Text("Join via Link")
+                            .font(.headline)
+                        Text("Code: \(code)")
+                            .font(.system(.title3, design: .monospaced).weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                        Text("You opened a link containing a join code. Confirm to proceed.")
+                            .font(.footnote)
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        HStack(spacing: 24) {
+                            Button("Cancel") {
+                                withAnimation(.spring()) { chat.cancelPendingDeepLinkJoin() }
+                            }
+                            Button {
+                                // Custom deep link join with naming step
+                                confirmDeepLinkJoinWithNaming()
+                            } label: {
+                                Label("Join", systemImage: "arrow.right.circle.fill")
+                                    .font(.body.weight(.semibold))
+                            }
+                            .buttonStyle(.glass)
                         }
-                        Button {
-                            chat.confirmPendingDeepLinkJoin()
-                        } label: {
-                            Label("Join", systemImage: "arrow.right.circle.fill")
-                                .font(.body.weight(.semibold))
+                    } else {
+                        Text("Name This Room")
+                            .font(.headline)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Room name", text: $newRoomTempName)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                                .focused($nameFieldFocused)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.15))
+                                )
                         }
-                        .buttonStyle(.glass)
+                        .transition(.opacity.combined(with: .scale))
+                        HStack(spacing: 20) {
+                            Button("Skip") {
+                                finalizeDeepLinkJoinName(nil)
+                            }
+                            Button("Save") {
+                                finalizeDeepLinkJoinName(newRoomTempName.trimmingCharacters(in: .whitespacesAndNewlines))
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(newRoomTempName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
                     }
                 }
                 .padding(20)
@@ -68,107 +105,142 @@ struct SignalingToolbar: ViewModifier {
                 .padding()
                 .transition(.scale.combined(with: .opacity))
             }
-            if isExpanded {
-                Color.clear
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { withAnimation(.spring()) { isExpanded = false } }
-            }
             if showJoinPopup {
                 Color.black.opacity(0.2)
                     .ignoresSafeArea()
                     .transition(.opacity)
                     .onTapGesture {
-                        joinFieldFocused = false
-                        endEditing()
-                        withAnimation(.spring()) { showJoinPopup = false }
-                    }
-
-                VStack(spacing: 12) {
-                    Text("Enter Join Code")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    TextField("", text: $joinCode)
-                        .keyboardType(.numberPad)
-                        .textContentType(.oneTimeCode)
-                        .focused($joinFieldFocused)
-                        .frame(width: 1, height: 1)
-                        .opacity(0.01)
-                        .onChange(of: joinCode) { newValue in
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered.count > 6 {
-                                joinCode = String(filtered.prefix(6))
-                            } else if filtered != newValue {
-                                joinCode = filtered
-                            }
-                        }
-
-                    HStack(spacing: 8) {
-                        ForEach(0..<6, id: \.self) { idx in
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.15))
-
-                                let ch = character(at: idx)
-                                Text(ch)
-                                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                                    .foregroundColor(.primary)
-                                    .opacity(ch.isEmpty ? 0 : 1)
-                                    .scaleEffect(ch.isEmpty ? 0.95 : 1.0)
-                                    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: ch)
-
-                                if joinFieldFocused && joinCode.count < 6 && idx == joinCode.count && ch.isEmpty {
-                                    Rectangle()
-                                        .fill(Color.accentColor.opacity(0.9))
-                                        .frame(width: 2, height: 24)
-                                        .opacity(caretBlinkOn ? 1 : 0)
-                                        .transition(.opacity)
-                                }
-                            }
-                            .frame(width: 42, height: 50)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { joinFieldFocused = true }
-
-                    HStack(spacing: 20) {
-                        Button(role: .cancel) {
+                        if showNameStep {
+                            // Ignore outside tap during name step to reduce accidental dismiss
+                        } else {
                             joinFieldFocused = false
                             endEditing()
                             withAnimation(.spring()) { showJoinPopup = false }
-                        } label: { Text("Cancel") }
+                        }
+                    }
 
-                        Button {
-                            let code = joinCode
-                            Task { @MainActor in
-                                if let roomId = await chat.acceptJoinCode(code) {
-                                    _ = chat.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
-                                    chat.joinRoom(roomId: roomId)
+                VStack(spacing: 14) {
+                    if !showNameStep {
+                        Text("Enter Join Code")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+
+                        TextField("", text: $joinCode)
+                            .keyboardType(.numberPad)
+                            .textContentType(.oneTimeCode)
+                            .focused($joinFieldFocused)
+                            .frame(width: 1, height: 1)
+                            .opacity(0.01)
+                            .onChange(of: joinCode) { newValue in
+                                let filtered = newValue.filter { $0.isNumber }
+                                if filtered.count > 6 {
+                                    joinCode = String(filtered.prefix(6))
+                                } else if filtered != newValue {
+                                    joinCode = filtered
                                 }
                             }
-                            joinFieldFocused = false
-                            endEditing()
-                            withAnimation(.spring()) {
-                                showJoinPopup = false
-                                isExpanded = false
-                                joinCode = ""
+
+                        HStack(spacing: 8) {
+                            ForEach(0..<6, id: \.self) { idx in
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.15))
+
+                                    let ch = character(at: idx)
+                                    Text(ch)
+                                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.primary)
+                                        .opacity(ch.isEmpty ? 0 : 1)
+                                        .scaleEffect(ch.isEmpty ? 0.95 : 1.0)
+                                        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: ch)
+
+                                    if joinFieldFocused && joinCode.count < 6 && idx == joinCode.count && ch.isEmpty {
+                                        Rectangle()
+                                            .fill(Color.accentColor.opacity(0.9))
+                                            .frame(width: 2, height: 24)
+                                            .opacity(caretBlinkOn ? 1 : 0)
+                                            .transition(.opacity)
+                                    }
+                                }
+                                .frame(width: 42, height: 50)
                             }
-                        } label: {
-                            Text("Join")
-                                .fontWeight(.semibold)
                         }
-                        .disabled(joinCode.count != 6)
-                        .buttonStyle(.glass)
-                        .tint(joinCode.count == 6 ? .green : .gray)
-                        Button {
-                            showJoinScanner = true
-                        } label: {
-                            Image(systemName: "qrcode.viewfinder")
+                        .contentShape(Rectangle())
+                        .onTapGesture { joinFieldFocused = true }
+
+                        HStack(spacing: 20) {
+                            Button(role: .cancel) {
+                                joinFieldFocused = false
+                                endEditing()
+                                withAnimation(.spring()) { showJoinPopup = false }
+                            } label: { Text("Cancel") }
+
+                            Button {
+                                let code = joinCode
+                                Task { @MainActor in
+                                    if let roomId = await chat.acceptJoinCode(code) {
+                                        // Create session and transition to naming step
+                                        _ = chat.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
+                                        chat.joinRoom(roomId: roomId)
+                                        withAnimation(.spring()) {
+                                            showNameStep = true
+                                            joinFieldFocused = false
+                                            endEditing()
+                                        }
+                                        // Focus name field after animation
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                            nameFieldFocused = true
+                                        }
+                                    } else {
+                                        // Could show error feedback here
+                                        withAnimation(.shake()) { }
+                                    }
+                                }
+                            } label: {
+                                Text("Join")
+                                    .fontWeight(.semibold)
+                            }
+                            .disabled(joinCode.count != 6)
+                            .buttonStyle(.glass)
+                            .tint(joinCode.count == 6 ? .green : .gray)
+                            Button {
+                                showJoinScanner = true
+                            } label: {
+                                Image(systemName: "qrcode.viewfinder")
+                            }
+                            .accessibilityLabel("Scan QR code")
                         }
-                        .accessibilityLabel("Scan QR code")
+                    } else {
+                        Text("Name This Room")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Room name", text: $newRoomTempName)
+                                .textInputAutocapitalization(.words)
+                                .autocorrectionDisabled()
+                                .focused($nameFieldFocused)
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.15))
+                                )
+                        }
+                        .transition(.opacity.combined(with: .scale))
+                        HStack(spacing: 20) {
+                            Button("Skip") {
+                                finalizeJoinName(nil)
+                            }
+                            Button("Save") {
+                                finalizeJoinName(newRoomTempName.trimmingCharacters(in: .whitespacesAndNewlines))
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(newRoomTempName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
                     }
                 }
                 .padding(16)
@@ -344,6 +416,22 @@ struct SignalingToolbar: ViewModifier {
         }
         .onDisappear { isExpanded = false }
         .onChange(of: scenePhase) { _ in isExpanded = false }
+        .onChange(of: chat.sessions) { _ in
+            // Auto-close create popups when session becomes accepted (other client joined)
+            if showCreatePopup || showCreateResult || showCreatedQRCode {
+                if let activeSession = chat.sessions.first(where: { $0.id == chat.activeSessionId }),
+                   activeSession.status == .accepted {
+                    withAnimation(.spring()) {
+                        showCreatePopup = false
+                        showCreateResult = false
+                        showCreatedQRCode = false
+                        roomName = ""
+                        durationMinutes = 5
+                        createdCode = ""
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showJoinScanner) {
             QRCodeScannerContainer { code in
                 if code.lowercased().hasPrefix("inviso://join/") {
@@ -460,6 +548,58 @@ struct SignalingToolbar: ViewModifier {
             return "\(h) hours"
         }
     }
+
+    private func finalizeJoinName(_ name: String?) {
+        // Find most recent accepted session without name (created by others)
+        if let session = chat.sessions.first(where: { $0.status == .accepted && $0.isCreatedByMe == false && ($0.name == nil || $0.name?.isEmpty == true) }) {
+            chat.renameSession(session, newName: name?.isEmpty == true ? nil : name)
+        }
+        withAnimation(.spring()) {
+            showNameStep = false
+            showJoinPopup = false
+            isExpanded = false
+            joinCode = ""
+            newRoomTempName = ""
+        }
+    }
+    
+    private func confirmDeepLinkJoinWithNaming() {
+        guard let code = chat.pendingDeepLinkCode else { return }
+        guard chat.connectionStatus == .connected else { return }
+        
+        Task { @MainActor in
+            // Use custom deep link join that will trigger naming step
+            if await chat.confirmPendingDeepLinkJoinWithNaming(code: code) {
+                withAnimation(.spring()) {
+                    showDeepLinkNameStep = true
+                }
+                // Focus name field after animation
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    nameFieldFocused = true
+                }
+            } else {
+                // Join failed, could show error feedback
+                withAnimation(.shake()) { }
+            }
+        }
+    }
+    
+    private func finalizeDeepLinkJoinName(_ name: String?) {
+        // Find most recent accepted session without name (created by others)
+        if let session = chat.sessions.first(where: { $0.status == .accepted && $0.isCreatedByMe == false && ($0.name == nil || $0.name?.isEmpty == true) }) {
+            chat.renameSession(session, newName: name?.isEmpty == true ? nil : name)
+        }
+        withAnimation(.spring()) {
+            showDeepLinkNameStep = false
+            newRoomTempName = ""
+        }
+        chat.cancelPendingDeepLinkJoin()
+    }
+}
+
+// MARK: - Shake animation util
+private extension Animation {
+    static func shake() -> Animation { .easeInOut(duration: 0.12) }
 }
 
 extension View {

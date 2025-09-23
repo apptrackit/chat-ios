@@ -161,6 +161,7 @@ struct SessionsView: View {
     }
 }
 
+
 // MARK: - Rename prompt
 extension SessionsView {
     private func promptRename(_ session: ChatSession) {
