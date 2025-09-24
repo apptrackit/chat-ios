@@ -17,6 +17,9 @@ struct ContentView: View {
                 Tab("Manual Room", systemImage: "rectangle.and.pencil.and.ellipsis") {
                     NavigationStack { ManualRoomView() }
                 }
+                Tab("LLM", systemImage: "brain.head.profile") {
+                    NavigationStack { LLMView() }
+                }
             }
         } else {
             // Fallback for older iOS: standard TabView with a dedicated Search tab
@@ -28,6 +31,8 @@ struct ContentView: View {
                     .tabItem { Label("Rooms", systemImage: "rectangle.and.pencil.and.ellipsis") }
 
                 // Removed Search tab for consistency
+                NavigationView { LLMView() }
+                    .tabItem { Label("LLM", systemImage: "brain.head.profile") }
             }
         }
     }
