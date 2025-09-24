@@ -145,6 +145,7 @@ Environment‑driven config can be introduced by wrapping these in a struct inje
 * Analytics & telemetry (with privacy controls).
 * Offline queue (buffer sends until P2P established).
 * Theming + accessibility improvements (Dynamic Type, VoiceOver labels for system messages).
+* On‑device LLM assistant (iOS 26+) — local inference chat tab (prototype added).
 
 ## 13. Troubleshooting
 | Symptom | Possible Cause | Action |
@@ -198,6 +199,20 @@ This is a development / demonstration project. Do not ship to production without
 | Send message | `ChatManager.sendMessage` |
 | Leave room | `ChatManager.leave` |
 | P2P event | `PeerConnectionManagerDelegate` methods |
+| On‑device LLM chat | `OnDeviceLLMManager` via `LLMView` |
+
+---
+
+### On‑Device LLM (Preview)
+An experimental tab (`LLM`) showcases a local assistant UI. Implementation notes:
+
+* Manager: `OnDeviceLLMManager` (observable) reuses existing `ChatMessage` model.
+* Availability: Gated by `#available(iOS 26, *)` – gracefully degrades with a system message if unsupported.
+* Current Logic: Placeholder echo response with artificial delay; wired for future streaming token integration once full FoundationModels API surface is finalized.
+* UI: Minimal scrollable transcript + input bar; shows a progress indicator while generating.
+* Next Steps: Replace placeholder with real model session initialization, add configurable system prompt, add stop button, implement per‑message streaming updates.
+
+Safety: No external network calls are performed for LLM replies; placeholder text is generated locally.
 
 ---
 
