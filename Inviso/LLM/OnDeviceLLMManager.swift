@@ -101,15 +101,13 @@ final class OnDeviceLLMManager: ObservableObject {
                 do {
                     let response = try await session.respond(to: userText)
                     let mirror = Mirror(reflecting: response)
-                    let replyText = (
+                    let fullText = (
                         mirror.children.first(where: { $0.label == "content" })?.value as? String ??
                         mirror.children.first(where: { $0.label == "rawContent" })?.value as? String ??
                         mirror.children.first(where: { $0.label == "text" })?.value as? String ??
                         String(describing: response)
                     )
-                    await MainActor.run {
-                        self.messages.append(ChatMessage(text: replyText, timestamp: Date(), isFromSelf: false))
-                    }
+                    await self.animateReply(fullText)
                 } catch is CancellationError {
                     await MainActor.run { self.isCancelled = true }
                 } catch {
@@ -122,9 +120,8 @@ final class OnDeviceLLMManager: ObservableObject {
         }
 #endif
         // Fallback placeholder path (older OS or module not present)
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        let reply = "(Fallback) You said: \(userText)"
-        messages.append(ChatMessage(text: reply, timestamp: Date(), isFromSelf: false))
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    await animateReply("(Fallback) You said: \(userText)")
     }
 
     func cancelGeneration() {
@@ -135,5 +132,28 @@ final class OnDeviceLLMManager: ObservableObject {
         }
 #endif
         isCancelled = true
+    }
+
+    private func animateReply(_ full: String) async {
+        await MainActor.run {
+            self.messages.append(ChatMessage(text: "", timestamp: Date(), isFromSelf: false))
+        }
+        let delay: UInt64 = 10_000_000 // 18ms per char (~55 chars/sec)
+        for (idx, ch) in full.enumerated() {
+            if Task.isCancelled { break }
+            if isCancelled { break }
+            await MainActor.run {
+                if var last = self.messages.last, !last.isFromSelf, !last.isSystem {
+                    last.text.append(ch)
+                    self.messages[self.messages.count - 1] = last
+                }
+            }
+            // Slightly longer pause at sentence boundaries
+            if ch == "." || ch == "!" || ch == "?" {
+                try? await Task.sleep(nanoseconds: delay * 4)
+            } else {
+                try? await Task.sleep(nanoseconds: delay)
+            }
+        }
     }
 }
