@@ -175,6 +175,7 @@ struct ChatView: View {
     }
 }
 
+
 // Helper to disable the interactive pop (swipe-back) gesture so the confirmation can't be bypassed.
 private struct DisablePopGesture: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {

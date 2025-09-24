@@ -192,6 +192,37 @@ class ChatManager: NSObject, ObservableObject {
     guard connectionStatus == .connected else { return }
         handleJoinCodeFromDeepLink(code: code)
     }
+    
+    // Called by UI for deep link join with naming step
+    func confirmPendingDeepLinkJoinWithNaming(code: String) async -> Bool {
+        guard connectionStatus == .connected else { return false }
+        
+        // Validate 6-digit pattern
+        guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return false }
+        
+        // If already have an accepted or pending session with this code, select it
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+            activeSessionId = existing.id
+            // If already accepted and have roomId, join room automatically
+            if let rid = existing.roomId { joinRoom(roomId: rid) }
+            return true
+        }
+        
+        // Otherwise attempt accept flow
+        if let roomId = await acceptJoinCode(code) {
+            let session = addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
+            joinRoom(roomId: roomId)
+            activeSessionId = session.id
+            return true
+        } else {
+            // Create a pending session placeholder so UI can show waiting state
+            let pending = ChatSession(name: nil, code: code, createdAt: Date(), expiresAt: Date().addingTimeInterval(5*60), status: .pending, isCreatedByMe: false)
+            sessions.insert(pending, at: 0)
+            activeSessionId = pending.id
+            persistSessions()
+            return false
+        }
+    }
 
     func cancelPendingDeepLinkJoin() { pendingDeepLinkCode = nil }
 
