@@ -100,15 +100,13 @@ final class OnDeviceLLMManager: ObservableObject {
                 guard let self else { return }
                 do {
                     let response = try await session.respond(to: userText)
-                    let replyText: String
-                    // Attempt to access a 'text' property via reflection (future-proof) else use description
-                    if let mirrorText = Mirror(reflecting: response).children.first(where: { $0.label == "text" })?.value as? String {
-                        replyText = mirrorText
-                    } else if let str = response as? String { // in case API returns String directly in future
-                        replyText = str
-                    } else {
-                        replyText = String(describing: response)
-                    }
+                    let mirror = Mirror(reflecting: response)
+                    let replyText = (
+                        mirror.children.first(where: { $0.label == "content" })?.value as? String ??
+                        mirror.children.first(where: { $0.label == "rawContent" })?.value as? String ??
+                        mirror.children.first(where: { $0.label == "text" })?.value as? String ??
+                        String(describing: response)
+                    )
                     await MainActor.run {
                         self.messages.append(ChatMessage(text: replyText, timestamp: Date(), isFromSelf: false))
                     }

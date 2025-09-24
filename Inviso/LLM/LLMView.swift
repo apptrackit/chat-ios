@@ -37,8 +37,9 @@ struct LLMView: View {
                     }
                     .padding(.vertical, 12)
                 }
-                .onChange(of: llm.messages.count) { _ in
-                    if let last = llm.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: llm.messages.count) { oldValue, newValue in
+                    guard newValue > oldValue, let last = llm.messages.last else { return }
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
         }
