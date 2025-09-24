@@ -48,7 +48,20 @@ struct LLMView: View {
     }
 
     private var bottomBar: some View {
-        Group {
+        VStack(spacing: 6) {
+            if let err = llm.lastError {
+                Text(err)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+            } else if llm.isCancelled {
+                Text("Generation cancelled")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+            }
             let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             HStack(spacing: 8) {
                 SearchBarField(text: $input, placeholder: llm.isSupported ? (llm.isGenerating ? "Generating…" : "Message") : "Unsupported", onSubmit: { send() })
@@ -56,9 +69,13 @@ struct LLMView: View {
                     .disabled(!llm.isSupported || llm.isGenerating)
                     .opacity(llm.isSupported ? 1 : 0.6)
                 if llm.isGenerating {
-                    ProgressView()
-                        .frame(width: 32, height: 32)
-                        .transition(.opacity)
+                    Button(role: .destructive) { llm.cancelGeneration() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.red)
+                    }
+                    .frame(width: 36, height: 36)
+                    .transition(.opacity)
                 } else if hasText && llm.isSupported {
                     Button(action: send) {
                         Image(systemName: "arrow.up")
