@@ -15,7 +15,7 @@ enum ConnectionStatus: String, CaseIterable {
 
 struct ChatMessage: Identifiable, Equatable {
     let id = UUID()
-    let text: String
+    var text: String
     let timestamp: Date
     let isFromSelf: Bool
     var isSystem: Bool = false
