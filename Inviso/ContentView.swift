@@ -30,7 +30,6 @@ struct ContentView: View {
                 NavigationView { ManualRoomView() }
                     .tabItem { Label("Rooms", systemImage: "rectangle.and.pencil.and.ellipsis") }
 
-                // Removed Search tab for consistency
                 NavigationView { LLMView() }
                     .tabItem { Label("LLM", systemImage: "brain.head.profile") }
             }
