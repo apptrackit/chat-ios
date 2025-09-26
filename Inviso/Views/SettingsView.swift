@@ -9,6 +9,15 @@ struct SettingsView: View {
     @ObservedObject private var serverConfig = ServerConfig.shared
     @State private var editServerHost: String = ServerConfig.shared.host
     @State private var showServerChangeAlert = false
+    @ObservedObject private var authStore = AuthenticationSettingsStore.shared
+    @State private var requireBiometric = AuthenticationSettingsStore.shared.settings.mode.requiresBiometrics
+    @State private var requirePassphrase = AuthenticationSettingsStore.shared.settings.mode.requiresPassphrase
+    @State private var hasPassphrase = PassphraseManager.shared.hasPassphrase
+    @State private var biometricCapability = BiometricAuth.shared.capability()
+    @State private var showPassphraseSheet = false
+    @State private var pendingPassphraseIntent: PassphraseIntent?
+    @State private var passphraseErrorMessage: String?
+    @State private var isApplyingAuthChange = false
 
     var body: some View {
         Form {
@@ -35,6 +44,8 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            securitySection
 
             Section(header: Text("About")) {
                 HStack {
@@ -124,6 +135,23 @@ struct SettingsView: View {
         .onAppear {
             // Ensure we show the latest value when returning to this screen
             deviceID = DeviceIDManager.shared.id
+            syncAuthState()
+            biometricCapability = BiometricAuth.shared.capability()
+        }
+        .onReceive(authStore.$settings) { _ in syncAuthState() }
+        .alert("Authentication Error", isPresented: Binding(get: { passphraseErrorMessage != nil }, set: { if !$0 { passphraseErrorMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(passphraseErrorMessage ?? "")
+        }
+        .sheet(isPresented: $showPassphraseSheet, onDismiss: handlePassphraseSheetDismiss) {
+            if let intent = pendingPassphraseIntent {
+                PassphraseSetupView(
+                    mode: intent == .change ? .change : .create,
+                    onComplete: handlePassphraseSet(_:),
+                    onCancel: handlePassphraseCancel
+                )
+            }
         }
     }
 }
@@ -135,6 +163,116 @@ struct SettingsView: View {
 
 // MARK: - Erase helpers
 extension SettingsView {
+    private enum PassphraseIntent {
+        case enable
+        case change
+    }
+
+    private var passphraseManager: PassphraseManager { .shared }
+
+    @ViewBuilder
+    private var securitySection: some View {
+        Section(header: Text("Security")) {
+            Toggle(isOn: Binding(get: { requireBiometric }, set: { updateBiometricToggle($0) })) {
+                Label("Require \(biometricCapability.localizedName)", systemImage: biometricCapability.systemImageName)
+            }
+            .disabled(biometricCapability == .none)
+            if biometricCapability == .none {
+                Text("Biometric authentication isn't available on this device.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            Toggle(isOn: Binding(get: { requirePassphrase }, set: { updatePassphraseToggle($0) })) {
+                Label("Require Passphrase", systemImage: "key.fill")
+            }
+
+            Button(hasPassphrase ? "Change Passphrase" : "Set Passphrase") {
+                pendingPassphraseIntent = hasPassphrase ? .change : .enable
+                showPassphraseSheet = true
+            }
+            .buttonStyle(.borderless)
+
+            Label(hasPassphrase ? "Passphrase configured" : "No passphrase set", systemImage: hasPassphrase ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                .foregroundColor(hasPassphrase ? .secondary : .orange)
+                .font(.footnote)
+
+            Text("Authentication is required whenever the app returns to the foreground.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func syncAuthState() {
+        isApplyingAuthChange = true
+        let mode = authStore.settings.mode
+        requireBiometric = mode.requiresBiometrics
+        requirePassphrase = mode.requiresPassphrase
+        hasPassphrase = passphraseManager.hasPassphrase
+        isApplyingAuthChange = false
+    }
+
+    private func updateBiometricToggle(_ newValue: Bool) {
+        guard !isApplyingAuthChange else { return }
+        if newValue && biometricCapability == .none {
+            requireBiometric = false
+            passphraseErrorMessage = "This device doesn't support biometrics."
+            return
+        }
+        applyAuthenticationMode(biometric: newValue, passphrase: requirePassphrase)
+    }
+
+    private func updatePassphraseToggle(_ newValue: Bool) {
+        guard !isApplyingAuthChange else { return }
+        if newValue {
+            guard hasPassphrase else {
+                pendingPassphraseIntent = .enable
+                showPassphraseSheet = true
+                DispatchQueue.main.async { requirePassphrase = false }
+                return
+            }
+        } else {
+            applyAuthenticationMode(biometric: requireBiometric, passphrase: false)
+            return
+        }
+        applyAuthenticationMode(biometric: requireBiometric, passphrase: newValue)
+    }
+
+    private func applyAuthenticationMode(biometric: Bool, passphrase: Bool) {
+        let newMode: AuthenticationSettings.Mode
+        switch (biometric, passphrase) {
+        case (true, true): newMode = .both
+        case (true, false): newMode = .biometricOnly
+        case (false, true): newMode = .passphraseOnly
+        default: newMode = .disabled
+        }
+        authStore.update { $0.mode = newMode }
+    }
+
+    private func handlePassphraseSet(_ passphrase: String) {
+        do {
+            try passphraseManager.setPassphrase(passphrase)
+            hasPassphrase = true
+            if pendingPassphraseIntent == .enable {
+                requirePassphrase = true
+                applyAuthenticationMode(biometric: requireBiometric, passphrase: true)
+            }
+            pendingPassphraseIntent = nil
+            showPassphraseSheet = false
+        } catch {
+            passphraseErrorMessage = "Unable to store passphrase securely."
+        }
+    }
+
+    private func handlePassphraseCancel() {
+        pendingPassphraseIntent = nil
+        showPassphraseSheet = false
+    }
+
+    private func handlePassphraseSheetDismiss() {
+        pendingPassphraseIntent = nil
+    }
+
     private func eraseAll(deviceId: String) async {
         await purgeServer(deviceId: deviceId)
         clearLocalStores()
