@@ -339,6 +339,7 @@ extension SettingsView {
             requirePassphrase = false
         }
         applyAuthenticationMode(biometric: requireBiometric, passphrase: false)
+        syncAuthState()
     }
 
     private func requestReauthentication(for action: SensitiveSecurityAction) {
@@ -392,6 +393,7 @@ extension SettingsView {
         case .removePassphrase:
             performPassphraseRemoval()
         }
+        syncAuthState()
     }
 
     private func performBiometricReauthentication() {
