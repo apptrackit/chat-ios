@@ -22,6 +22,12 @@ struct SecuredContentView<Content: View>: View {
                     .zIndex(999) // Ensure it appears above all other content
                     .transition(.opacity.animation(.easeInOut(duration: 0.1)))
             }
+
+            if securityManager.isLocked {
+                AuthenticationLockView(manager: securityManager)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                    .zIndex(998)
+            }
         }
     }
 }
