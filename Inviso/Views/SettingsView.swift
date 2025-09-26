@@ -398,6 +398,8 @@ extension SettingsView {
         guard !isReauthBiometricInFlight, pendingSensitiveAction != nil else { return }
         isReauthBiometricInFlight = true
         Task {
+            NotificationCenter.default.post(name: .securityExternalAuthWillBegin, object: nil)
+            defer { NotificationCenter.default.post(name: .securityExternalAuthDidEnd, object: nil) }
             let reason = pendingSensitiveAction?.biometricReason ?? "Authenticate"
             let result = await BiometricAuth.shared.authenticateAllowingDevicePasscode(
                 reason: reason,

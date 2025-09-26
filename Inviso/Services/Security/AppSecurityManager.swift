@@ -27,6 +27,7 @@ final class AppSecurityManager: ObservableObject {
     private var biometricSatisfied = false
     private var passphraseSatisfied = false
     private var biometricAutoAttempted = false
+    private var externalAuthDepth = 0
 
     private static let unlockReason = "Unlock to access protected chats"
 
@@ -83,6 +84,28 @@ final class AppSecurityManager: ObservableObject {
                 self?.handleDidBecomeActive()
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.handleDidEnterBackground()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .securityExternalAuthWillBegin)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.externalAuthDepth += 1
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .securityExternalAuthDidEnd)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.externalAuthDepth = max(0, self.externalAuthDepth - 1)
+            }
+            .store(in: &cancellables)
     }
 
     private func observeSettingsChanges() {
@@ -106,6 +129,7 @@ final class AppSecurityManager: ObservableObject {
     }
 
     private func handleWillResignActive() {
+        guard externalAuthDepth == 0 else { return }
         showPrivacyOverlay = true
         if settingsStore.settings.mode != .disabled {
             lock()
@@ -118,6 +142,13 @@ final class AppSecurityManager: ObservableObject {
             return
         }
         evaluateLockIfNeeded()
+    }
+
+    private func handleDidEnterBackground() {
+        showPrivacyOverlay = true
+        if settingsStore.settings.mode != .disabled {
+            lock()
+        }
     }
 
     private func evaluateLockIfNeeded() {
