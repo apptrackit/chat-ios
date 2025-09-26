@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var pendingPassphraseIntent: PassphraseIntent?
     @State private var passphraseErrorMessage: String?
     @State private var isApplyingAuthChange = false
+    @State private var showRemovePassphraseConfirm = false
 
     var body: some View {
         Form {
@@ -144,6 +145,14 @@ struct SettingsView: View {
         } message: {
             Text(passphraseErrorMessage ?? "")
         }
+        .alert("Remove Passphrase?", isPresented: $showRemovePassphraseConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Remove", role: .destructive) {
+                removePassphrase()
+            }
+        } message: {
+            Text("This deletes the stored passphrase and disables passphrase authentication.")
+        }
         .sheet(isPresented: $showPassphraseSheet, onDismiss: handlePassphraseSheetDismiss) {
             if let intent = pendingPassphraseIntent {
                 PassphraseSetupView(
@@ -193,6 +202,13 @@ extension SettingsView {
             }
             .buttonStyle(.borderless)
 
+            if hasPassphrase {
+                Button("Remove Passphrase", role: .destructive) {
+                    showRemovePassphraseConfirm = true
+                }
+                .buttonStyle(.borderless)
+            }
+
             Label(hasPassphrase ? "Passphrase configured" : "No passphrase set", systemImage: hasPassphrase ? "checkmark.seal.fill" : "exclamationmark.triangle")
                 .foregroundColor(hasPassphrase ? .secondary : .orange)
                 .font(.footnote)
@@ -238,6 +254,16 @@ extension SettingsView {
         applyAuthenticationMode(biometric: requireBiometric, passphrase: newValue)
     }
 
+    private func removePassphrase() {
+        passphraseManager.clear()
+        passphraseErrorMessage = nil
+        hasPassphrase = passphraseManager.hasPassphrase
+        if requirePassphrase {
+            requirePassphrase = false
+        }
+        applyAuthenticationMode(biometric: requireBiometric, passphrase: false)
+    }
+
     private func applyAuthenticationMode(biometric: Bool, passphrase: Bool) {
         let newMode: AuthenticationSettings.Mode
         switch (biometric, passphrase) {
@@ -275,7 +301,10 @@ extension SettingsView {
 
     private func eraseAll(deviceId: String) async {
         await purgeServer(deviceId: deviceId)
-        clearLocalStores()
+        await clearLocalStores()
+        await MainActor.run {
+            syncAuthState()
+        }
     }
 
     private func purgeServer(deviceId: String) async {
@@ -295,7 +324,11 @@ extension SettingsView {
         }
     }
 
-    private func clearLocalStores() {
+    private func clearLocalStores() async {
+        PassphraseManager.shared.clear()
+        await MainActor.run {
+            AuthenticationSettingsStore.shared.reset()
+        }
         // UserDefaults
         if let bundleId = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleId)

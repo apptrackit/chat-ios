@@ -43,6 +43,11 @@ final class AuthenticationSettingsStore: ObservableObject {
         persist()
     }
 
+    func reset() {
+        settings = .default
+        persist()
+    }
+
     private func persist() {
         guard let data = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(data, forKey: storeKey)

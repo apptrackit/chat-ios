@@ -46,8 +46,8 @@ final class AppSecurityManager: ObservableObject {
 
     func triggerBiometricIfNeeded() {
         guard shouldPromptBiometric else { return }
-    biometricAutoAttempted = true
-    attemptBiometricUnlock()
+        biometricAutoAttempted = true
+        attemptBiometricUnlock()
     }
 
     func submitPassphrase(_ value: String) {
@@ -155,8 +155,24 @@ final class AppSecurityManager: ObservableObject {
     }
 
     private func updateLockState() {
-        let mode = settingsStore.settings.mode
-        requiresPassphraseEntry = mode.requiresPassphrase && !passphraseSatisfied
+        var mode = settingsStore.settings.mode
+        let hasStoredPassphrase = passphraseManager.hasPassphrase
+
+        if mode.requiresPassphrase && !hasStoredPassphrase {
+            settingsStore.update { settings in
+                switch settings.mode {
+                case .both:
+                    settings.mode = .biometricOnly
+                case .passphraseOnly:
+                    settings.mode = .disabled
+                default:
+                    break
+                }
+            }
+            mode = settingsStore.settings.mode
+        }
+
+        requiresPassphraseEntry = mode.requiresPassphrase && hasStoredPassphrase && !passphraseSatisfied
         shouldPromptBiometric = mode.requiresBiometrics && !biometricSatisfied
 
 
