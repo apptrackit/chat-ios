@@ -54,6 +54,9 @@ class ChatManager: NSObject, ObservableObject {
         signaling.disconnect()
         pcm.close()
         BackgroundConnectionKeeper.shared.setActive(false)
+        Task { @MainActor in
+            ConnectionLiveActivityController.shared.end()
+        }
     }
 
     // Public API
@@ -71,6 +74,7 @@ class ChatManager: NSObject, ObservableObject {
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
         BackgroundConnectionKeeper.shared.setActive(false)
+        ConnectionLiveActivityController.shared.end()
     }
 
     // Change server host at runtime. Disconnects current signaling and rebuilds client.
@@ -111,6 +115,7 @@ class ChatManager: NSObject, ObservableObject {
         let currentRoom = roomId
         roomId = ""
     updateKeepAliveState()
+        updateLiveActivityState()
         // Fallback: gently reconnect WS if no ack after a short delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
@@ -643,6 +648,7 @@ extension ChatManager {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateKeepAliveState()
+                self?.updateLiveActivityState()
             }
             .store(in: &cancellables)
 
@@ -650,6 +656,7 @@ extension ChatManager {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateKeepAliveState()
+                self?.updateLiveActivityState()
             }
             .store(in: &cancellables)
 
@@ -657,6 +664,7 @@ extension ChatManager {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateKeepAliveState()
+                self?.updateLiveActivityState()
             }
             .store(in: &cancellables)
 
@@ -664,6 +672,7 @@ extension ChatManager {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.updateKeepAliveState()
+                self?.updateLiveActivityState()
             }
             .store(in: &cancellables)
     }
@@ -671,6 +680,7 @@ extension ChatManager {
     func handleScenePhaseChange(_ phase: ScenePhase) {
         scenePhase = phase
         updateKeepAliveState()
+        updateLiveActivityState()
     }
 
     private func updateKeepAliveState() {
@@ -678,5 +688,29 @@ extension ChatManager {
         let joinedRoom = connectionStatus == .connected && roomId.isEmpty == false
         let shouldMaintain = inBackground && joinedRoom
         BackgroundConnectionKeeper.shared.setActive(shouldMaintain)
+    }
+
+    private func updateLiveActivityState() {
+        guard connectionStatus == .connected, roomId.isEmpty == false else {
+            ConnectionLiveActivityController.shared.end()
+            return
+        }
+        let label = currentRoomDisplayName()
+        ConnectionLiveActivityController.shared.update(roomName: label, isConnected: isP2PConnected)
+    }
+
+    private func currentRoomDisplayName() -> String {
+        if let active = activeSessionId,
+           let session = sessions.first(where: { $0.id == active }) {
+            return session.displayName
+        }
+        if let session = sessions.first(where: { $0.roomId == roomId }) {
+            return session.displayName
+        }
+        if !roomId.isEmpty {
+            let short = roomId.prefix(6)
+            return "Room \(short)"
+        }
+        return "Room"
     }
 }

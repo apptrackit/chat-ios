@@ -8,11 +8,41 @@
 
 /* Begin PBXBuildFile section */
 		493A515F2E783575004692B2 /* trackit icon 2.icon in Resources */ = {isa = PBXBuildFile; fileRef = 493A515E2E783575004692B2 /* trackit icon 2.icon */; };
+		495AB0072E89DFEB0024A613 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 495AB0062E89DFEB0024A613 /* WidgetKit.framework */; };
+		495AB0092E89DFEB0024A613 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 495AB0082E89DFEB0024A613 /* SwiftUI.framework */; };
+		495AB01A2E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 495AB0042E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		49AE6D142E74AB0D0076150B /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 49AE6D132E74AB0D0076150B /* WebRTC */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		495AB0182E89DFEB0024A613 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49AE6BEF2E7488960076150B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 495AB0032E89DFEB0024A613;
+			remoteInfo = ConnectionStatusWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		495AB01B2E89DFEB0024A613 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				495AB01A2E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		493A515E2E783575004692B2 /* trackit icon 2.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "trackit icon 2.icon"; sourceTree = "<group>"; };
+		495AB0042E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ConnectionStatusWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		495AB0062E89DFEB0024A613 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		495AB0082E89DFEB0024A613 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		49AE6BF72E7488960076150B /* Inviso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inviso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -24,13 +54,36 @@
 			);
 			target = 49AE6BF62E7488960076150B /* Inviso */;
 		};
+		495AB01F2E89DFEB0024A613 /* Exceptions for "ConnectionStatusWidget" folder in "ConnectionStatusWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 495AB0032E89DFEB0024A613 /* ConnectionStatusWidgetExtension */;
+		};
+		495AB0212E89E03A0024A613 /* Exceptions for "Inviso" folder in "ConnectionStatusWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Services/LiveActivity/ConnectionActivityAttributes.swift,
+			);
+			target = 495AB0032E89DFEB0024A613 /* ConnectionStatusWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		495AB00A2E89DFEB0024A613 /* ConnectionStatusWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				495AB01F2E89DFEB0024A613 /* Exceptions for "ConnectionStatusWidget" folder in "ConnectionStatusWidgetExtension" target */,
+			);
+			path = ConnectionStatusWidget;
+			sourceTree = "<group>";
+		};
 		49AE6BF92E7488960076150B /* Inviso */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				49365F122E7CD2B0009DD60D /* Exceptions for "Inviso" folder in "Inviso" target */,
+				495AB0212E89E03A0024A613 /* Exceptions for "Inviso" folder in "ConnectionStatusWidgetExtension" target */,
 			);
 			path = Inviso;
 			sourceTree = "<group>";
@@ -38,6 +91,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		495AB0012E89DFEB0024A613 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				495AB0092E89DFEB0024A613 /* SwiftUI.framework in Frameworks */,
+				495AB0072E89DFEB0024A613 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF42E7488960076150B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -49,11 +111,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		495AB0052E89DFEB0024A613 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				495AB0062E89DFEB0024A613 /* WidgetKit.framework */,
+				495AB0082E89DFEB0024A613 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		49AE6BEE2E7488960076150B = {
 			isa = PBXGroup;
 			children = (
 				493A515E2E783575004692B2 /* trackit icon 2.icon */,
 				49AE6BF92E7488960076150B /* Inviso */,
+				495AB00A2E89DFEB0024A613 /* ConnectionStatusWidget */,
+				495AB0052E89DFEB0024A613 /* Frameworks */,
 				49AE6BF82E7488960076150B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				49AE6BF72E7488960076150B /* Inviso.app */,
+				495AB0042E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,6 +143,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		495AB0032E89DFEB0024A613 /* ConnectionStatusWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 495AB01E2E89DFEB0024A613 /* Build configuration list for PBXNativeTarget "ConnectionStatusWidgetExtension" */;
+			buildPhases = (
+				495AB0002E89DFEB0024A613 /* Sources */,
+				495AB0012E89DFEB0024A613 /* Frameworks */,
+				495AB0022E89DFEB0024A613 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				495AB00A2E89DFEB0024A613 /* ConnectionStatusWidget */,
+			);
+			name = ConnectionStatusWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = ConnectionStatusWidgetExtension;
+			productReference = 495AB0042E89DFEB0024A613 /* ConnectionStatusWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		49AE6BF62E7488960076150B /* Inviso */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 49AE6C022E7488970076150B /* Build configuration list for PBXNativeTarget "Inviso" */;
@@ -76,10 +172,12 @@
 				49AE6BF32E7488960076150B /* Sources */,
 				49AE6BF42E7488960076150B /* Frameworks */,
 				49AE6BF52E7488960076150B /* Resources */,
+				495AB01B2E89DFEB0024A613 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				495AB0192E89DFEB0024A613 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				49AE6BF92E7488960076150B /* Inviso */,
@@ -102,6 +200,9 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					495AB0032E89DFEB0024A613 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					49AE6BF62E7488960076150B = {
 						CreatedOnToolsVersion = 26.0;
 					};
@@ -125,11 +226,19 @@
 			projectRoot = "";
 			targets = (
 				49AE6BF62E7488960076150B /* Inviso */,
+				495AB0032E89DFEB0024A613 /* ConnectionStatusWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		495AB0022E89DFEB0024A613 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF52E7488960076150B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -141,6 +250,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		495AB0002E89DFEB0024A613 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF32E7488960076150B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -150,7 +266,75 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		495AB0192E89DFEB0024A613 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 495AB0032E89DFEB0024A613 /* ConnectionStatusWidgetExtension */;
+			targetProxy = 495AB0182E89DFEB0024A613 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		495AB01C2E89DFEB0024A613 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ConnectionStatusWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ConnectionStatusWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.Inviso.ConnectionStatusWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		495AB01D2E89DFEB0024A613 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ConnectionStatusWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ConnectionStatusWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.Inviso.ConnectionStatusWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		49AE6C002E7488970076150B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -347,6 +531,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		495AB01E2E89DFEB0024A613 /* Build configuration list for PBXNativeTarget "ConnectionStatusWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				495AB01C2E89DFEB0024A613 /* Debug */,
+				495AB01D2E89DFEB0024A613 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		49AE6BF22E7488960076150B /* Build configuration list for PBXProject "Inviso" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

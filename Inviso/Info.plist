@@ -21,5 +21,9 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>UIApplicationSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 </dict>
 </plist>
