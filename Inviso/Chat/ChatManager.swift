@@ -659,6 +659,13 @@ extension ChatManager {
                 self?.updateKeepAliveState()
             }
             .store(in: &cancellables)
+
+        $roomId
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateKeepAliveState()
+            }
+            .store(in: &cancellables)
     }
 
     func handleScenePhaseChange(_ phase: ScenePhase) {
@@ -668,8 +675,8 @@ extension ChatManager {
 
     private func updateKeepAliveState() {
         let inBackground = (scenePhase == .background)
-        let isConnected = connectionStatus == .connected && (isP2PConnected || remotePeerPresent)
-        let shouldMaintain = inBackground && isConnected
+        let joinedRoom = connectionStatus == .connected && roomId.isEmpty == false
+        let shouldMaintain = inBackground && joinedRoom
         BackgroundConnectionKeeper.shared.setActive(shouldMaintain)
     }
 }
