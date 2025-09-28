@@ -8,6 +8,7 @@
 import Foundation
 import WebRTC
 import Combine
+import SwiftUI
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
@@ -36,6 +37,8 @@ class ChatManager: NSObject, ObservableObject {
     private var hadP2POnce = false
     // Deep link join waiting confirmation
     @Published var pendingDeepLinkCode: String? = nil
+    private var cancellables = Set<AnyCancellable>()
+    private var scenePhase: ScenePhase = .active
 
     override init() {
     self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
@@ -43,12 +46,14 @@ class ChatManager: NSObject, ObservableObject {
     signaling.delegate = self
         pcm.delegate = self
         loadSessions()
+        setupObservers()
     }
 
     deinit {
         // Avoid heavy sync work on deinit; perform a lightweight teardown.
         signaling.disconnect()
         pcm.close()
+        BackgroundConnectionKeeper.shared.setActive(false)
     }
 
     // Public API
@@ -65,6 +70,7 @@ class ChatManager: NSObject, ObservableObject {
         clientId = nil
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
+        BackgroundConnectionKeeper.shared.setActive(false)
     }
 
     // Change server host at runtime. Disconnects current signaling and rebuilds client.
@@ -104,6 +110,7 @@ class ChatManager: NSObject, ObservableObject {
         signaling.send(["type": "leave_room"])        
         let currentRoom = roomId
         roomId = ""
+    updateKeepAliveState()
         // Fallback: gently reconnect WS if no ack after a short delay.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self else { return }
@@ -451,6 +458,7 @@ class ChatManager: NSObject, ObservableObject {
             // The UI can distinguish waiting state via isP2PConnected/remotePeerPresent.
             self.remotePeerPresent = false
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
+            self.updateKeepAliveState()
         case "left_room":
             self.isAwaitingLeaveAck = false
         case "error":
@@ -499,6 +507,7 @@ extension ChatManager: PeerConnectionManagerDelegate {
             classifyConnectionPath()
             remotePeerPresent = true
         }
+        updateKeepAliveState()
     }
     func pcmDidReceiveMessage(_ text: String) {
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
@@ -624,5 +633,43 @@ extension ChatManager {
         } catch {
             return .unreachable
         }
+    }
+}
+
+// MARK: - Scene phase + background keep-alive
+extension ChatManager {
+    private func setupObservers() {
+        $isP2PConnected
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateKeepAliveState()
+            }
+            .store(in: &cancellables)
+
+        $remotePeerPresent
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateKeepAliveState()
+            }
+            .store(in: &cancellables)
+
+        $connectionStatus
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateKeepAliveState()
+            }
+            .store(in: &cancellables)
+    }
+
+    func handleScenePhaseChange(_ phase: ScenePhase) {
+        scenePhase = phase
+        updateKeepAliveState()
+    }
+
+    private func updateKeepAliveState() {
+        let inBackground = (scenePhase == .background)
+        let isConnected = connectionStatus == .connected && (isP2PConnected || remotePeerPresent)
+        let shouldMaintain = inBackground && isConnected
+        BackgroundConnectionKeeper.shared.setActive(shouldMaintain)
     }
 }

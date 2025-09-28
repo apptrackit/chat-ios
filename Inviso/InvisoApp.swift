@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct InvisoApp: App {
     @StateObject private var chat = ChatManager()
+    @Environment(\.scenePhase) private var scenePhase
     var body: some Scene {
         WindowGroup {
             SecuredContentView {
@@ -19,6 +20,9 @@ struct InvisoApp: App {
                         chat.handleIncomingURL(url)
                     }
             }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            chat.handleScenePhaseChange(newPhase)
         }
     }
 }
