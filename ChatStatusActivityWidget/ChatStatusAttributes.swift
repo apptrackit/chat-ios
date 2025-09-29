@@ -1,8 +1,8 @@
 //
-//  ConnectionActivityAttributes.swift
-//  Inviso
+//  ChatStatusAttributes.swift
+//  ChatStatusActivityWidget
 //
-//  Created by GitHub Copilot on 9/28/25.
+//  Shared ActivityKit attributes for Live Activity
 //
 
 import Foundation

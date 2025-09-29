@@ -1,5 +1,6 @@
 import SwiftUI
 import LocalAuthentication
+import ActivityKit
 
 struct SettingsView: View {
     @EnvironmentObject private var chat: ChatManager
@@ -84,6 +85,10 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
+            
+            #if DEBUG
+            liveActivityTestSection
+            #endif
             
             Section(header: Text("Danger Zone")) {
                 Button(role: .destructive) {
@@ -747,4 +752,85 @@ private struct ReauthenticationModalView: View {
             for url in items { try? fm.removeItem(at: url) }
         }
     }
+    
+    #if DEBUG
+    @ViewBuilder
+    private var liveActivityTestSection: some View {
+        Section(header: Text("Live Activity Testing")) {
+            HStack {
+                Text("Status")
+                Spacer()
+                if #available(iOS 16.1, *) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(LiveActivityManager.isAvailable ? "Available" : "Not Available")
+                            .foregroundColor(LiveActivityManager.isAvailable ? .green : .orange)
+                        Text("(\(LiveActivityManager.activeCount) active)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        // Diagnostic info
+                        Text("iOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("Device: \(UIDevice.current.model)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("iOS 16.1+ Required")
+                        .foregroundColor(.orange)
+                }
+            }
+            
+            if #available(iOS 16.1, *) {
+                // Diagnostic section
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Diagnostics:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Text("• Activities Enabled: \(ActivityAuthorizationInfo().areActivitiesEnabled ? "✅" : "❌")")
+                        .font(.caption2)
+                    Text("• Bundle: \(Bundle.main.bundleIdentifier ?? "Unknown")")
+                        .font(.caption2)
+                    Text("• Extension: ChatStatusActivityWidget")
+                        .font(.caption2)
+                }
+                .padding(.vertical, 4)
+                
+                Button("Test Start Waiting") {
+                    Task {
+                        print("🧪 Starting Live Activity test...")
+                        print("🧪 Activities enabled: \(ActivityAuthorizationInfo().areActivitiesEnabled)")
+                        await LiveActivityManager.start(roomId: "test-room")
+                    }
+                }
+                
+                Button("Test Update to Connected") {
+                    Task {
+                        await LiveActivityManager.updateToConnected(roomId: "test-room")
+                    }
+                }
+                
+                Button("Test Update to Waiting") {
+                    Task {
+                        await LiveActivityManager.updateToWaiting(roomId: "test-room")
+                    }
+                }
+                
+                Button("Test End") {
+                    Task {
+                        await LiveActivityManager.end(roomId: "test-room")
+                    }
+                }
+                
+                Button("End All Activities") {
+                    Task {
+                        await LiveActivityManager.endAll()
+                    }
+                }
+                .foregroundColor(.red)
+            }
+        }
+    }
+    #endif
 }

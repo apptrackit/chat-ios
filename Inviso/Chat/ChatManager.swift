@@ -8,6 +8,7 @@
 import Foundation
 import WebRTC
 import Combine
+import ActivityKit
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
@@ -62,6 +63,13 @@ class ChatManager: NSObject, ObservableObject {
         // End any background task
         endBackgroundTask()
         
+        // End all Live Activities
+        if #available(iOS 16.1, *) {
+            Task {
+                await LiveActivityManager.endAll()
+            }
+        }
+        
         signaling.disconnect()
         pcm.close()
         messages.removeAll()
@@ -96,6 +104,13 @@ class ChatManager: NSObject, ObservableObject {
     if isEphemeral { messages.removeAll() }
         self.roomId = roomId
         signaling.send(["type": "join_room", "roomId": roomId])
+        
+        // Start Live Activity for waiting state
+        if #available(iOS 16.1, *) {
+            Task {
+                await LiveActivityManager.start(roomId: roomId)
+            }
+        }
     }
 
     func leave(userInitiated: Bool = false) {
@@ -106,6 +121,15 @@ class ChatManager: NSObject, ObservableObject {
         pcm.close()
         isP2PConnected = false
     remotePeerPresent = false
+        
+        // End Live Activity for this room
+        let currentRoomId = roomId
+        if #available(iOS 16.1, *) {
+            Task {
+                await LiveActivityManager.end(roomId: currentRoomId)
+            }
+        }
+        
         // Send leave to server and clear local room immediately.
         isAwaitingLeaveAck = true
         signaling.send(["type": "leave_room"])        
@@ -862,8 +886,12 @@ extension ChatManager {
             // Send local notification if app is not active
             LocalNotificationManager.shared.notifyPeerConnected(roomId: self.roomId)
             
-            // TODO: Update Live Activity when implemented
-            // Task { await updateLiveActivity(status: .connected) }
+            // Update Live Activity to connected state
+            if #available(iOS 16.1, *) {
+                Task {
+                    await LiveActivityManager.updateToConnected(roomId: self.roomId)
+                }
+            }
         }
     }
     
@@ -880,8 +908,12 @@ extension ChatManager {
             // Send disconnection notification if app is not active
             LocalNotificationManager.shared.notifyPeerDisconnected(roomId: self.roomId)
             
-            // TODO: Update Live Activity when implemented
-            // Task { await updateLiveActivity(status: .waiting) }
+            // Update Live Activity back to waiting state (only if we're still in a room)
+            if #available(iOS 16.1, *), !self.roomId.isEmpty {
+                Task {
+                    await LiveActivityManager.updateToWaiting(roomId: self.roomId)
+                }
+            }
         }
     }
 }

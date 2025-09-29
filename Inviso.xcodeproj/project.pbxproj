@@ -8,11 +8,41 @@
 
 /* Begin PBXBuildFile section */
 		493A515F2E783575004692B2 /* trackit icon 2.icon in Resources */ = {isa = PBXBuildFile; fileRef = 493A515E2E783575004692B2 /* trackit icon 2.icon */; };
+		495AB1952E8ABCB90024A613 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 495AB1762E8ABC530024A613 /* WidgetKit.framework */; };
+		495AB1962E8ABCB90024A613 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 495AB1782E8ABC530024A613 /* SwiftUI.framework */; };
+		495AB1A52E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 495AB1942E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		49AE6D142E74AB0D0076150B /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 49AE6D132E74AB0D0076150B /* WebRTC */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		495AB1A32E8ABCB90024A613 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49AE6BEF2E7488960076150B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 495AB1932E8ABCB90024A613;
+			remoteInfo = ChatStatusActivityWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		495AB18F2E8ABC540024A613 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				495AB1A52E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		493A515E2E783575004692B2 /* trackit icon 2.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "trackit icon 2.icon"; sourceTree = "<group>"; };
+		495AB1762E8ABC530024A613 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		495AB1782E8ABC530024A613 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		495AB1942E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ChatStatusActivityWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		49AE6BF72E7488960076150B /* Inviso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inviso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -24,9 +54,24 @@
 			);
 			target = 49AE6BF62E7488960076150B /* Inviso */;
 		};
+		495AB1A92E8ABCB90024A613 /* Exceptions for "ChatStatusActivityWidget" folder in "ChatStatusActivityWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 495AB1932E8ABCB90024A613 /* ChatStatusActivityWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		495AB1972E8ABCB90024A613 /* ChatStatusActivityWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				495AB1A92E8ABCB90024A613 /* Exceptions for "ChatStatusActivityWidget" folder in "ChatStatusActivityWidgetExtension" target */,
+			);
+			path = ChatStatusActivityWidget;
+			sourceTree = "<group>";
+		};
 		49AE6BF92E7488960076150B /* Inviso */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -38,6 +83,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		495AB1912E8ABCB90024A613 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				495AB1962E8ABCB90024A613 /* SwiftUI.framework in Frameworks */,
+				495AB1952E8ABCB90024A613 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF42E7488960076150B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -49,11 +103,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		495AB1752E8ABC530024A613 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				495AB1762E8ABC530024A613 /* WidgetKit.framework */,
+				495AB1782E8ABC530024A613 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		49AE6BEE2E7488960076150B = {
 			isa = PBXGroup;
 			children = (
 				493A515E2E783575004692B2 /* trackit icon 2.icon */,
 				49AE6BF92E7488960076150B /* Inviso */,
+				495AB1972E8ABCB90024A613 /* ChatStatusActivityWidget */,
+				495AB1752E8ABC530024A613 /* Frameworks */,
 				49AE6BF82E7488960076150B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +127,7 @@
 			isa = PBXGroup;
 			children = (
 				49AE6BF72E7488960076150B /* Inviso.app */,
+				495AB1942E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,6 +135,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		495AB1932E8ABCB90024A613 /* ChatStatusActivityWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 495AB1A62E8ABCB90024A613 /* Build configuration list for PBXNativeTarget "ChatStatusActivityWidgetExtension" */;
+			buildPhases = (
+				495AB1902E8ABCB90024A613 /* Sources */,
+				495AB1912E8ABCB90024A613 /* Frameworks */,
+				495AB1922E8ABCB90024A613 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				495AB1972E8ABCB90024A613 /* ChatStatusActivityWidget */,
+			);
+			name = ChatStatusActivityWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = ChatStatusActivityWidgetExtension;
+			productReference = 495AB1942E8ABCB90024A613 /* ChatStatusActivityWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		49AE6BF62E7488960076150B /* Inviso */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 49AE6C022E7488970076150B /* Build configuration list for PBXNativeTarget "Inviso" */;
@@ -76,10 +164,12 @@
 				49AE6BF32E7488960076150B /* Sources */,
 				49AE6BF42E7488960076150B /* Frameworks */,
 				49AE6BF52E7488960076150B /* Resources */,
+				495AB18F2E8ABC540024A613 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				495AB1A42E8ABCB90024A613 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				49AE6BF92E7488960076150B /* Inviso */,
@@ -102,6 +192,9 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					495AB1932E8ABCB90024A613 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					49AE6BF62E7488960076150B = {
 						CreatedOnToolsVersion = 26.0;
 					};
@@ -125,11 +218,19 @@
 			projectRoot = "";
 			targets = (
 				49AE6BF62E7488960076150B /* Inviso */,
+				495AB1932E8ABCB90024A613 /* ChatStatusActivityWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		495AB1922E8ABCB90024A613 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF52E7488960076150B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -141,6 +242,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		495AB1902E8ABCB90024A613 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF32E7488960076150B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -150,7 +258,75 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		495AB1A42E8ABCB90024A613 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 495AB1932E8ABCB90024A613 /* ChatStatusActivityWidgetExtension */;
+			targetProxy = 495AB1A32E8ABCB90024A613 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		495AB1A72E8ABCB90024A613 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ChatStatusActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ChatStatusActivityWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso.ChatStatusActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		495AB1A82E8ABCB90024A613 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ChatStatusActivityWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ChatStatusActivityWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso.ChatStatusActivityWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		49AE6C002E7488970076150B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -279,7 +455,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Inviso/Inviso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -297,7 +473,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.3.lion;
+				MARKETING_VERSION = 1.5.4.cassowary;
 				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -317,7 +493,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Inviso/Inviso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -335,7 +511,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.3.lion;
+				MARKETING_VERSION = 1.5.4.cassowary;
 				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -351,6 +527,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		495AB1A62E8ABCB90024A613 /* Build configuration list for PBXNativeTarget "ChatStatusActivityWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				495AB1A72E8ABCB90024A613 /* Debug */,
+				495AB1A82E8ABCB90024A613 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		49AE6BF22E7488960076150B /* Build configuration list for PBXProject "Inviso" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
