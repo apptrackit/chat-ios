@@ -11,6 +11,8 @@ import Combine
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
+    static let shared = ChatManager()
+    
     @Published var connectionStatus: ConnectionStatus = .disconnected
     @Published var messages: [ChatMessage] = []
     @Published var roomId: String = ""
@@ -34,13 +36,15 @@ class ChatManager: NSObject, ObservableObject {
     private var pendingJoinRoomId: String?
     private var suppressReconnectOnce = false
     private var hadP2POnce = false
+    // Background task management
+    private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
     // Deep link join waiting confirmation
     @Published var pendingDeepLinkCode: String? = nil
 
     override init() {
-    self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
-    super.init()
-    signaling.delegate = self
+        self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+        super.init()
+        signaling.delegate = self
         pcm.delegate = self
         loadSessions()
     }
@@ -55,6 +59,9 @@ class ChatManager: NSObject, ObservableObject {
     func connect() { signaling.connect() }
 
     func disconnect() {
+        // End any background task
+        endBackgroundTask()
+        
         signaling.disconnect()
         pcm.close()
         messages.removeAll()
@@ -451,6 +458,9 @@ class ChatManager: NSObject, ObservableObject {
             // The UI can distinguish waiting state via isP2PConnected/remotePeerPresent.
             self.remotePeerPresent = false
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
+            
+            // Trigger peer left notification
+            self.onPeerLeft()
         case "left_room":
             self.isAwaitingLeaveAck = false
         case "error":
@@ -491,6 +501,9 @@ extension ChatManager: PeerConnectionManagerDelegate {
     func pcmIceStateChanged(connected: Bool) {
         let was = isP2PConnected
         isP2PConnected = connected
+        
+        print("🔗 PCM ICE state changed: \(was) -> \(connected), App state: \(UIApplication.shared.applicationState.rawValue)")
+        
         if connected && was == false {
             messages.append(ChatMessage(text: "Client joined the room", timestamp: Date(), isFromSelf: false, isSystem: true))
             hadP2POnce = true
@@ -498,10 +511,24 @@ extension ChatManager: PeerConnectionManagerDelegate {
             markActiveSessionAccepted()
             classifyConnectionPath()
             remotePeerPresent = true
+            
+            // Trigger peer joined notification
+            onPeerJoined()
+        } else if !connected && was == true {
+            // Peer disconnected
+            remotePeerPresent = false
+            onPeerLeft()
         }
     }
     func pcmDidReceiveMessage(_ text: String) {
+        // Add message to chat history
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
+        
+        // Trigger notification if app is in background
+        let appState = UIApplication.shared.applicationState
+        if appState != .active {
+            LocalNotificationManager.shared.notifyNewMessage(text: text, roomId: roomId)
+        }
     }
 }
 
@@ -623,6 +650,238 @@ extension ChatManager {
             }
         } catch {
             return .unreachable
+        }
+    }
+}
+
+// MARK: - Background Management & Local Notifications
+extension ChatManager {
+    /// Prepare the chat manager for background operation
+    /// Suspends continuous connections and schedules background refresh
+    func prepareForBackground() {
+        print("ChatManager: Preparing for background mode - current room: \(roomId), P2P connected: \(isP2PConnected)")
+        
+        if !roomId.isEmpty {
+            if isP2PConnected {
+                // We have an active P2P connection - start background task to keep it alive
+                print("ChatManager: Active P2P connection detected - starting background task")
+                
+                // Start a background task to maintain the connection
+                startBackgroundTask()
+                
+                // Enter background mode with reduced heartbeat
+                signaling.enterBackgroundMode()
+                
+                // Persist state
+                persistRoomState()
+                
+            } else {
+                // We're in a waiting room - allow brief grace period for peer connections
+                print("ChatManager: In waiting room, allowing brief background connection time")
+                
+                // Allow a brief grace period for peer connections before suspending
+                DispatchQueue.main.asyncAfter(deadline: .now() + 30.0) { [weak self] in
+                    guard let self = self else { return }
+                    // Only suspend if still not connected and app is still backgrounded
+                    if UIApplication.shared.applicationState == .background && !self.isP2PConnected {
+                        print("ChatManager: Grace period expired, suspending signaling")
+                        self.signaling.suspend()
+                    }
+                }
+                
+                persistRoomState()
+            }
+        } else {
+            // Not in any room, suspend immediately
+            print("ChatManager: No active room, suspending signaling immediately")
+            signaling.suspend()
+        }
+        
+        // Schedule next background refresh opportunity
+        BackgroundTaskManager.shared.scheduleAppRefresh()
+    }
+    
+    // MARK: - Background Task Management
+    
+    private func startBackgroundTask() {
+        // End any existing background task
+        endBackgroundTask()
+        
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "P2P Connection Maintenance") { [weak self] in
+            print("ChatManager: Background task expiring, cleaning up")
+            self?.handleBackgroundTaskExpiration()
+        }
+        
+        print("ChatManager: Started background task \(backgroundTaskId.rawValue) for P2P maintenance")
+    }
+    
+    private func endBackgroundTask() {
+        if backgroundTaskId != .invalid {
+            print("ChatManager: Ending background task \(backgroundTaskId.rawValue)")
+            UIApplication.shared.endBackgroundTask(backgroundTaskId)
+            backgroundTaskId = .invalid
+        }
+    }
+    
+    private func handleBackgroundTaskExpiration() {
+        print("ChatManager: Background task expired, suspending P2P connection")
+        
+        // Background task is about to expire, gracefully suspend
+        DispatchQueue.main.async {
+            if self.isP2PConnected {
+                // Close P2P connection gracefully
+                self.pcm.close()
+                self.isP2PConnected = false
+                
+                // Suspend signaling
+                self.signaling.suspend()
+                
+                // Send notification about connection loss if user needs to know
+                if !self.roomId.isEmpty {
+                    LocalNotificationManager.shared.sendTestNotification(
+                        title: "Connection Suspended", 
+                        body: "Your chat connection was suspended in the background. Tap to reconnect."
+                    )
+                }
+            }
+            
+            self.endBackgroundTask()
+        }
+    }
+    
+    /// Resume the chat manager from background mode
+    /// Reconnects signaling and updates room state
+    func resumeFromBackground() {
+        print("ChatManager: Resuming from background - P2P connected: \(isP2PConnected)")
+        
+        // End any background task since we're back in foreground
+        endBackgroundTask()
+        
+        if isP2PConnected && !roomId.isEmpty {
+            // We have an active P2P connection - restore normal signaling heartbeat
+            print("ChatManager: Restoring normal signaling heartbeat for active P2P connection")
+            signaling.exitBackgroundMode()
+        } else {
+            // No active P2P connection - resume normal signaling
+            print("ChatManager: Resuming normal signaling operation")
+            signaling.resume()
+        }
+        
+        // Clear any delivered notifications since user is now active
+        LocalNotificationManager.shared.clearAllNotifications()
+        
+        // Update room polling to refresh current state
+        if connectionStatus == .connected {
+            pollPendingAndValidateRooms()
+        }
+    }
+    
+    /// Lightweight background refresh for maintaining room state
+    /// Called during BGAppRefreshTask opportunities
+    func backgroundRefreshPendingRooms() {
+        print("ChatManager: Background refresh of pending rooms")
+        
+        // Only perform lightweight operations during background refresh
+        // Do NOT attempt to maintain persistent connections
+        
+        // Check if we have any active room or pending sessions
+        guard !roomId.isEmpty || sessions.contains(where: { $0.status == .pending || $0.status == .accepted }) else {
+            return
+        }
+        
+        // Validate persisted room state without heavy network operations
+        validatePersistedRoomState()
+    }
+    
+    /// Handle notification tap to rejoin a room
+    /// Called when user taps a peer connection notification
+    func handleNotificationTap(for roomId: String) {
+        print("ChatManager: Handling notification tap for room: \(roomId)")
+        
+        // Ensure we're connected before attempting to join
+        guard connectionStatus == .connected else {
+            // If not connected, store the room for joining once connected
+            pendingJoinRoomId = roomId
+            connect()
+            return
+        }
+        
+        // Join the room directly
+        joinRoom(roomId: roomId)
+        
+        // Clear notifications for this room
+        LocalNotificationManager.shared.clearNotifications(for: roomId)
+    }
+    
+    /// Persist minimal room state for background operations
+    private func persistRoomState() {
+        let roomState: [String: Any] = [
+            "roomId": roomId,
+            "isP2PConnected": isP2PConnected,
+            "remotePeerPresent": remotePeerPresent,
+            "lastActiveTimestamp": Date().timeIntervalSince1970
+        ]
+        
+        UserDefaults.standard.set(roomState, forKey: "chat.room.state")
+    }
+    
+    /// Validate persisted room state during background refresh
+    private func validatePersistedRoomState() {
+        guard let roomState = UserDefaults.standard.dictionary(forKey: "chat.room.state"),
+              let persistedRoomId = roomState["roomId"] as? String,
+              !persistedRoomId.isEmpty else {
+            return
+        }
+        
+        // Check timestamp to avoid stale state
+        let lastActive = roomState["lastActiveTimestamp"] as? TimeInterval ?? 0
+        let timeSinceLastActive = Date().timeIntervalSince1970 - lastActive
+        
+        // Clear state if too old (e.g., more than 30 minutes)
+        if timeSinceLastActive > 30 * 60 {
+            UserDefaults.standard.removeObject(forKey: "chat.room.state")
+            return
+        }
+        
+        print("ChatManager: Validated room state for room: \(persistedRoomId)")
+    }
+}
+
+// MARK: - Peer Event Handling for Notifications
+extension ChatManager {
+    /// Called when a peer joins the current room
+    /// Triggers local notification if app is backgrounded
+    func onPeerJoined() {
+        print("ChatManager: Peer joined room: \(roomId)")
+        
+        // Ensure we're on the main thread for UI updates
+        DispatchQueue.main.async {
+            // Update state
+            self.remotePeerPresent = true
+            
+            // Send local notification if app is not active
+            LocalNotificationManager.shared.notifyPeerConnected(roomId: self.roomId)
+            
+            // TODO: Update Live Activity when implemented
+            // Task { await updateLiveActivity(status: .connected) }
+        }
+    }
+    
+    /// Called when a peer leaves the current room  
+    /// May trigger local notification if appropriate
+    func onPeerLeft() {
+        print("ChatManager: Peer left room: \(roomId)")
+        
+        // Ensure we're on the main thread for UI updates
+        DispatchQueue.main.async {
+            // Update state
+            self.remotePeerPresent = false
+            
+            // Send disconnection notification if app is not active
+            LocalNotificationManager.shared.notifyPeerDisconnected(roomId: self.roomId)
+            
+            // TODO: Update Live Activity when implemented
+            // Task { await updateLiveActivity(status: .waiting) }
         }
     }
 }

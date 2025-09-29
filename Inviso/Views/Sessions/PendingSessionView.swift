@@ -136,6 +136,6 @@ struct PendingSessionView: View {
 #Preview {
     NavigationView {
         PendingSessionView(session: ChatSession(name: "Test", code: "123456"))
-            .environmentObject(ChatManager())
+            .environmentObject(ChatManager.shared)
     }
 }

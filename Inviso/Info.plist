@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.apptrackit.inviso.refresh</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -15,7 +19,9 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Face ID is used to quickly unlock your encrypted chats while keeping them private.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>background-fetch</string>
+	</array>
 </dict>
 </plist>

@@ -81,5 +81,5 @@ struct ManualRoomView: View {
 }
 
 #Preview {
-    NavigationView { ManualRoomView().environmentObject(ChatManager()) }
+    NavigationView { ManualRoomView().environmentObject(ChatManager.shared) }
 }

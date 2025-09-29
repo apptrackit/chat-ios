@@ -44,6 +44,61 @@ final class SignalingClient {
             ws?.cancel(with: .goingAway, reason: nil)
         }
     }
+    
+    /// Suspend the signaling connection for background mode
+    /// Cleanly closes the WebSocket without triggering reconnection
+    func suspend() {
+        print("SignalingClient: Suspending for background mode")
+        stopHeartbeat()
+        reconnectWorkItem?.cancel()
+        
+        let ws = webSocket
+        webSocket = nil
+        status = .disconnected
+        
+        // Close connection cleanly without notifying delegate
+        // to avoid triggering reconnection logic
+        DispatchQueue.global(qos: .utility).async {
+            ws?.cancel(with: .goingAway, reason: nil)
+        }
+    }
+    
+    /// Resume the signaling connection from background mode
+    /// Attempts to reconnect if previously connected
+    func resume() {
+        print("SignalingClient: Resuming from background mode")
+        
+        // Only attempt to reconnect if we were previously connected
+        // and don't already have an active connection
+        guard webSocket == nil && status != .connecting else { return }
+        
+        connect()
+    }
+    
+    /// Enter background mode - reduce heartbeat frequency but keep connection alive
+    /// Used when we have an active P2P connection that needs signaling support
+    func enterBackgroundMode() {
+        print("SignalingClient: Entering background mode - reducing heartbeat frequency")
+        
+        // Stop current heartbeat and restart with longer interval
+        stopHeartbeat()
+        
+        // Use longer heartbeat interval in background (2 minutes instead of 25 seconds)
+        pingTimer = Timer.scheduledTimer(withTimeInterval: 120.0, repeats: true) { [weak self] _ in
+            self?.sendPing()
+        }
+        if let timer = pingTimer { 
+            RunLoop.main.add(timer, forMode: .common) 
+        }
+    }
+    
+    /// Exit background mode - restore normal heartbeat frequency
+    func exitBackgroundMode() {
+        print("SignalingClient: Exiting background mode - restoring normal heartbeat")
+        
+        // Restart heartbeat with normal frequency
+        startHeartbeat()
+    }
 
     func send(_ dict: [String: Any]) {
         guard let ws = webSocket else { return }

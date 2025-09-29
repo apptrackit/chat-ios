@@ -235,7 +235,7 @@ struct MessageItem: Identifiable, Equatable {
 }
 
 #Preview {
-    NavigationView { ChatView().environmentObject(ChatManager()) }
+    NavigationView { ChatView().environmentObject(ChatManager.shared) }
 }
 
 private extension View {

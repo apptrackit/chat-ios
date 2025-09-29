@@ -6,10 +6,13 @@
 //
 
 import SwiftUI
+import BackgroundTasks
 
 @main
 struct InvisoApp: App {
-    @StateObject private var chat = ChatManager()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var chat = ChatManager.shared
+    
     var body: some Scene {
         WindowGroup {
             SecuredContentView {

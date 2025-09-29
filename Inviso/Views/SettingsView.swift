@@ -84,7 +84,7 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
-
+            
             Section(header: Text("Danger Zone")) {
                 Button(role: .destructive) {
                     showEraseConfirm = true
@@ -165,7 +165,7 @@ struct SettingsView: View {
 
 #Preview {
     NavigationView { SettingsView() }
-        .environmentObject(ChatManager())
+        .environmentObject(ChatManager.shared)
 }
 
 // MARK: - Erase helpers
