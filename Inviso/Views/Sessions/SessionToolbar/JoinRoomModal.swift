@@ -95,10 +95,12 @@ struct JoinRoomModal: View {
                         Button {
                             let code = joinCode
                             Task { @MainActor in
-                                if let roomId = await chat.acceptJoinCode(code) {
-                                    // Create session and transition to naming step
-                                    _ = chat.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
-                                    chat.joinRoom(roomId: roomId)
+                                if let result = await chat.acceptJoinCode(code) {
+                                    // Create session with ephemeral ID and transition to naming step
+                                    _ = chat.addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
+                                    // Register ephemeral ID
+                                    DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
+                                    chat.joinRoom(roomId: result.roomId)
                                     withAnimation(.spring()) {
                                         showNameStep = true
                                         joinFieldFocused = false
