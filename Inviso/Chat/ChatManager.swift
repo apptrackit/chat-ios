@@ -47,8 +47,10 @@ class ChatManager: NSObject, ObservableObject {
 
     deinit {
         // Avoid heavy sync work on deinit; perform a lightweight teardown.
-        signaling.disconnect()
-        pcm.close()
+        Task { @MainActor in
+            signaling.disconnect()
+            pcm.close()
+        }
     }
 
     // Public API

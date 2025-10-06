@@ -32,7 +32,7 @@ struct SessionsView: View {
                 chat.pollPendingAndValidateRooms()
             }
             .onDisappear { isVisible = false }
-            .onChange(of: scenePhase) { _ in
+            .onChange(of: scenePhase) {
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
             }
             .onReceive(ticker) { _ in

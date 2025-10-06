@@ -32,7 +32,7 @@ struct ChatView: View {
                     }
                     .padding(.vertical, 12)
                 }
-                .onChange(of: chat.messages.count) { _ in
+                .onChange(of: chat.messages.count) {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
             }
@@ -268,10 +268,9 @@ struct SearchBarField: UIViewRepresentable {
         sb.enablesReturnKeyAutomatically = true
         sb.delegate = context.coordinator
         // Remove magnifying icon
-        if let tf = sb.searchTextField as? UITextField {
-            tf.leftView = nil
-            tf.returnKeyType = .send // Show Send key
-        }
+        let tf = sb.searchTextField
+        tf.leftView = nil
+        tf.returnKeyType = .send // Show Send key
         return sb
     }
 

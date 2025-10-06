@@ -46,7 +46,7 @@ struct JoinRoomModal: View {
                         .focused($joinFieldFocused)
                         .frame(width: 1, height: 1)
                         .opacity(0.01)
-                        .onChange(of: joinCode) { newValue in
+                        .onChange(of: joinCode) { _, newValue in
                             let filtered = newValue.filter { $0.isNumber }
                             if filtered.count > 6 {
                                 joinCode = String(filtered.prefix(6))

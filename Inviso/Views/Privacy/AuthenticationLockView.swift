@@ -99,7 +99,7 @@ struct AuthenticationLockView: View {
                 }
             }
         }
-        .onChange(of: manager.requiresPassphraseEntry) { requires in
+        .onChange(of: manager.requiresPassphraseEntry) { _, requires in
             if requires {
                 passphrase = ""
                 isPassphraseFocused = true
