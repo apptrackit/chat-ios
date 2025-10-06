@@ -130,6 +130,8 @@ class ChatManager: NSObject, ObservableObject {
         sessions.removeAll()
         activeSessionId = nil
         persistSessions()
+        // Clear all ephemeral IDs
+        DeviceIDManager.shared.clearAllEphemeralIDs()
     }
 
     // MARK: - Deep Link Handling (inviso://join/<code>)
@@ -171,10 +173,12 @@ class ChatManager: NSObject, ObservableObject {
         // Otherwise attempt accept flow
         Task { [weak self] in
             guard let self = self else { return }
-            if let roomId = await self.acceptJoinCode(code) {
-                let session = self.addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
-                self.joinRoom(roomId: roomId)
+            if let result = await self.acceptJoinCode(code) {
+                let session = self.addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
+                self.joinRoom(roomId: result.roomId)
                 self.activeSessionId = session.id
+                // Register ephemeral ID
+                DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
             } else {
                 // Create a pending session placeholder so UI can show waiting state
                 let pending = ChatSession(name: nil, code: code, createdAt: Date(), expiresAt: Date().addingTimeInterval(5*60), status: .pending, isCreatedByMe: false)
@@ -209,10 +213,12 @@ class ChatManager: NSObject, ObservableObject {
         }
         
         // Otherwise attempt accept flow
-        if let roomId = await acceptJoinCode(code) {
-            let session = addAcceptedSession(name: nil, code: code, roomId: roomId, isCreatedByMe: false)
-            joinRoom(roomId: roomId)
+        if let result = await acceptJoinCode(code) {
+            let session = addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
+            joinRoom(roomId: result.roomId)
             activeSessionId = session.id
+            // Register ephemeral ID
+            DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
             return true
         } else {
             // Create a pending session placeholder so UI can show waiting state
@@ -237,8 +243,10 @@ class ChatManager: NSObject, ObservableObject {
         let session = ChatSession(name: name, code: code, createdAt: Date(), expiresAt: expires, status: .pending, isCreatedByMe: true)
         sessions.insert(session, at: 0)
         activeSessionId = session.id
-    persistSessions()
-    Task { await createPendingOnServer(session: session) }
+        // Register ephemeral ID
+        DeviceIDManager.shared.registerEphemeralID(session.ephemeralDeviceId, sessionName: name, code: code)
+        persistSessions()
+        Task { await createPendingOnServer(session: session) }
         return session
     }
 
@@ -266,10 +274,19 @@ class ChatManager: NSObject, ObservableObject {
         guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return }
         sessions[idx].name = newName
         persistSessions()
+        // Also update the ephemeral ID record with the new name
+        DeviceIDManager.shared.updateSessionName(ephemeralId: session.ephemeralDeviceId, newName: newName)
     }
 
     func removeSession(_ session: ChatSession) {
         if let rid = session.roomId { Task { await deleteRoomOnServer(roomId: rid) } }
+        // Purge ephemeral ID from server, then remove locally
+        Task {
+            await DeviceIDManager.purgeFromServer(ephemeralId: session.ephemeralDeviceId)
+            await MainActor.run {
+                DeviceIDManager.shared.removeEphemeralID(session.ephemeralDeviceId)
+            }
+        }
         sessions.removeAll { $0.id == session.id }
         if activeSessionId == session.id { activeSessionId = nil }
         persistSessions()
@@ -277,8 +294,8 @@ class ChatManager: NSObject, ObservableObject {
 
     /// Create and persist an accepted session (used for client2 joining by code, or when we already have roomId)
     @discardableResult
-    func addAcceptedSession(name: String?, code: String, roomId: String, isCreatedByMe: Bool) -> ChatSession {
-        let s = ChatSession(name: name, code: code, roomId: roomId, createdAt: Date(), expiresAt: nil, status: .accepted, isCreatedByMe: isCreatedByMe)
+    func addAcceptedSession(name: String?, code: String, roomId: String, ephemeralId: String, isCreatedByMe: Bool) -> ChatSession {
+        let s = ChatSession(name: name, code: code, roomId: roomId, createdAt: Date(), expiresAt: nil, status: .accepted, isCreatedByMe: isCreatedByMe, ephemeralDeviceId: ephemeralId)
         sessions.insert(s, at: 0)
         activeSessionId = s.id
         persistSessions()
@@ -290,7 +307,7 @@ class ChatManager: NSObject, ObservableObject {
         let joinid = session.code
         let expISO: String
         if let exp = session.expiresAt { expISO = ISO8601DateFormatter().string(from: exp) } else { expISO = ISO8601DateFormatter().string(from: Date().addingTimeInterval(300)) }
-        let client1 = DeviceIDManager.shared.id
+        let client1 = session.ephemeralDeviceId // Use ephemeral ID for privacy
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -299,8 +316,8 @@ class ChatManager: NSObject, ObservableObject {
         do { _ = try await URLSession.shared.data(for: req) } catch { print("createPending error: \(error)") }
     }
 
-    func acceptJoinCode(_ code: String) async -> String? {
-        let client2 = DeviceIDManager.shared.id
+    func acceptJoinCode(_ code: String) async -> (roomId: String, ephemeralId: String)? {
+        let client2 = UUID().uuidString // Generate new ephemeral ID for this session
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/accept"))
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -308,18 +325,20 @@ class ChatManager: NSObject, ObservableObject {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else { return nil }
-            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { return rid }
+            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { 
+                return (rid, client2)
+            }
             if http.statusCode == 404 || http.statusCode == 409 { return nil }
         } catch { print("acceptJoinCode error: \(error)") }
         return nil
     }
 
-    func checkPendingOnServer(joinid: String) async -> String? {
-        let client1 = DeviceIDManager.shared.id
+    func checkPendingOnServer(session: ChatSession) async -> String? {
+        let client1 = session.ephemeralDeviceId
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/check"))
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": joinid, "client1": client1])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": session.code, "client1": client1])
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else { return nil }
@@ -359,7 +378,7 @@ class ChatManager: NSObject, ObservableObject {
             for i in sessions.indices {
                 let s = sessions[i]
                 if s.status == .pending {
-                    if let rid = await checkPendingOnServer(joinid: s.code) {
+                    if let rid = await checkPendingOnServer(session: s) {
                         sessions[i].status = .accepted
                         sessions[i].roomId = rid
                         persistSessions()
@@ -383,6 +402,9 @@ class ChatManager: NSObject, ObservableObject {
                     }
                 }
             }
+            // 3) Prune ephemeral IDs for closed/removed sessions
+            let activeEphemeralIDs = Set(sessions.filter { $0.status != .closed }.map { $0.ephemeralDeviceId })
+            DeviceIDManager.shared.pruneEphemeralIDs(activeSessionIDs: activeEphemeralIDs)
         }
     }
 

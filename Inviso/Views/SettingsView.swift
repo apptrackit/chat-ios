@@ -3,8 +3,6 @@ import LocalAuthentication
 
 struct SettingsView: View {
     @EnvironmentObject private var chat: ChatManager
-    @State private var deviceID: String = DeviceIDManager.shared.id
-    @State private var showResetConfirm: Bool = false
     @State private var showEraseConfirm: Bool = false
     @State private var isErasing: Bool = false
     @ObservedObject private var serverConfig = ServerConfig.shared
@@ -28,26 +26,28 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section(header: Text("Account")) {
-                Button {
-                    showResetConfirm = true
+            Section(header: Text("Privacy")) {
+                NavigationLink {
+                    EphemeralIDsView()
                 } label: {
                     HStack {
-                        Text("Device ID")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Session Identities")
+                            Text("Each session uses a unique, ephemeral ID")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         Spacer()
-                        Text(deviceID)
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button(role: .destructive) {
-                        showResetConfirm = true
-                    } label: {
-                        Label("Reset Device ID…", systemImage: "arrow.counterclockwise")
+                        let count = DeviceIDManager.shared.getEphemeralIDs().count
+                        if count > 0 {
+                            Text("\(count)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue)
+                                .cornerRadius(10)
+                        }
                     }
                 }
             }
@@ -110,38 +110,24 @@ struct SettingsView: View {
         } message: {
             Text("Enter server host (e.g. chat.example.com). Current: \(serverConfig.host)")
         }
-        .alert("Reset Device ID?", isPresented: $showResetConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Reset", role: .destructive) {
-                DeviceIDManager.shared.reset()
-                deviceID = DeviceIDManager.shared.id
-            }
-        } message: {
-            Text("This will generate a new device identifier. Existing sessions will stop working.")
-        }
         .alert("Erase All Data?", isPresented: $showEraseConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Erase", role: .destructive) {
-                let oldId = deviceID
                 isErasing = true
                 Task {
-                // Clear in-memory and persisted UI state first so lists update immediately
-                chat.eraseLocalState()
-                    await eraseAll(deviceId: oldId)
-                    // Finally, reset device ID
-                    DeviceIDManager.shared.reset()
+                    // CRITICAL: Purge server FIRST (before clearing ephemeral IDs)
+                    await eraseAll()
+                    // Then clear in-memory and persisted UI state
                     await MainActor.run {
-                        deviceID = DeviceIDManager.shared.id
+                        chat.eraseLocalState()
                         isErasing = false
                     }
                 }
             }
         } message: {
-            Text("This removes all local data and cache, requests server-side purge for this device, and resets the device ID. This cannot be undone.")
+            Text("This removes all local data and cache, requests server-side purge for all your sessions, and clears all ephemeral IDs. This cannot be undone.")
         }
         .onAppear {
-            // Ensure we show the latest value when returning to this screen
-            deviceID = DeviceIDManager.shared.id
             syncAuthState()
             biometricCapability = BiometricAuth.shared.capability()
         }
@@ -703,16 +689,12 @@ private struct ReauthenticationModalView: View {
         activePassphraseModal = nil
     }
 
-    private func eraseAll(deviceId: String) async {
-        await purgeServer(deviceId: deviceId)
-        await clearLocalStores()
-        await MainActor.run {
-            syncAuthState()
-        }
+    private func eraseAll() async {
+        await AppDataReset.eraseAll()
     }
 
     private func purgeServer(deviceId: String) async {
-    guard let url = URL(string: "https://\(ServerConfig.shared.host)/api/user/purge") else { return }
+        guard let url = URL(string: "https://\(ServerConfig.shared.host)/api/user/purge") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -114,15 +114,3 @@ final class PassphraseManager {
         return Data(hasher.finalize())
     }
 }
-
-private extension KeychainService {
-    func data(for account: String) -> Data? {
-        guard let string = string(for: account) else { return nil }
-        return Data(base64Encoded: string)
-    }
-
-    func setData(_ data: Data, for account: String) throws {
-        let string = data.base64EncodedString()
-        try setString(string, for: account)
-    }
-}

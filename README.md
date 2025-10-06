@@ -24,11 +24,15 @@ Messages never transit the REST API after the P2P connection is established; onl
 ## 2. Core Features
 * Join‑code based session creation + acceptance workflow (pending → accepted → closed)
 * WebRTC DataChannel (ordered, reliable) for text messages
+* **Ephemeral device IDs per session** (no persistent device tracking)
+* **Automatic server purge** when sessions are deleted
+* Biometric authentication (Face ID / Touch ID) + passphrase protection
 * Automatic ICE gathering + TURN fallback
 * Heartbeat & reconnection strategy for signaling
 * Session persistence in `UserDefaults` (frontend only; no message storage server‑side)
 * Privacy overlay to hide content when app resigns active
 * Graceful leave + reconnection suppression to avoid thrash
+* Session name synchronization across UI components
 * Lightweight modular code (single responsibility objects)
 
 ## 3. High‑Level Architecture
@@ -51,7 +55,10 @@ SwiftUI Views (ChatView, SessionsView, etc.)
 | `ChatManager` | Orchestrates session lifecycle, REST calls, signaling messages, P2P state, UI‑facing published state. |
 | `SignalingClient` | Manages WebSocket connection, heartbeat ping, reconnect logic, JSON encode/decode. |
 | `PeerConnectionManager` | Creates & manages `RTCPeerConnection` and `RTCDataChannel`, offers/answers, ICE candidates. |
+| `DeviceIDManager` | Manages ephemeral device IDs per session, handles server purge requests on deletion. |
 | `AppSecurityManager` | Observes app lifecycle and toggles privacy overlay. |
+| `AuthenticationSettingsStore` | Manages biometric and passphrase authentication settings. |
+| `PassphraseManager` | Secure passphrase storage and validation using Keychain. |
 | SwiftUI Views | Render real‑time state and dispatch user intents (create session, send message, leave room). |
 
 ## 4. Session & Connection Lifecycle
@@ -90,13 +97,26 @@ No message content traverses the signaling server after P2P establishment (only 
 | Session polling | `pollPendingAndValidateRooms()` validates pending acceptance + still‑existing rooms |
 
 ## 7. Security & Privacy Notes
-| Area | Current Approach | Consider Hardening |
-|------|------------------|--------------------|
-| Transport | WebRTC DTLS + TURN relays (credentials in code) | Dynamic TURN creds (e.g., time‑limited tokens) |
-| Message storage | In‑memory only (optionally ephemeral) | Add E2E application‑level encryption (Double Ratchet) |
-| Background privacy | Fullscreen black overlay (`PrivacyOverlayView`) | Add biometric re‑unlock gate |
-| Device identity | UUID persisted (`DeviceIDManager.shared`) | Rotate / ephemeral IDs per session |
-| Error handling | Console prints | Structured logging + redaction |
+| Area | Current Approach | Notes |
+|------|------------------|-------|
+| Transport | WebRTC DTLS + TURN relays | Dynamic TURN creds recommended for production |
+| Message storage | In‑memory only (optionally ephemeral) | No message history stored server-side |
+| Background privacy | Fullscreen black overlay (`PrivacyOverlayView`) | Biometric re-unlock available via settings |
+| Device identity | **Ephemeral IDs per session** | Each session gets unique UUID, cannot be correlated |
+| Server cleanup | Automatic purge on deletion | Ephemeral IDs purged from server when sessions deleted |
+| Authentication | Optional biometric + passphrase | Face ID / Touch ID + custom passphrase support |
+| Error handling | Console prints with `[Component]` tags | Structured logging for debugging |
+
+### Ephemeral Identity System
+**Privacy-First Design:** No persistent device ID is stored or transmitted. Each chat session generates a unique ephemeral ID that:
+- Cannot be linked back to the device
+- Is automatically purged from the server when the session is deleted
+- Is cleared during "Erase All Data" operation
+- Enables complete session unlinkability
+
+**Server Purge API:** When ephemeral IDs are deleted locally, they are automatically purged from the backend via batch API (`POST /api/user/purge` with `{"deviceIds": [...]}`).
+
+**Session Name Sync:** When you rename a session, the name is synchronized to the ephemeral ID record, ensuring Settings → Privacy → Session Identities always shows current names.
 
 TURN credentials in the source are for development/testing only—rotate and secure in production.
 
@@ -109,10 +129,14 @@ Inviso/
   ChatManager.swift          # Orchestration & state
   Models/ChatModels.swift    # Connection + session models
   Signaling/SignalingClient.swift
-  WebRTC/PeerConnectionManager.swift
+  Networking/PeerConnectionManager.swift
   Security/                  # Privacy overlay & lifecycle security
+  Services/
+    Authentication/          # Biometric + passphrase auth
+    Storage/                 # DeviceIDManager, AppDataReset
   Views/                     # SwiftUI interface (ChatView, SessionsView, etc.)
-  Utilities/                 # Helpers (AppDataReset, etc.)
+    Settings/                # Settings UI including EphemeralIDsView
+  Utilities/                 # Helpers & security notifications
 ```
 
 ## 10. Build & Run
@@ -142,10 +166,12 @@ Environment‑driven config can be introduced by wrapping these in a struct inje
 * File or image transfer (DataChannel chunking + metadata messages).
 * Application‑level E2E encryption (Olm/DoubleRatchet libs) over DataChannel payload.
 * Push notifications for pending session acceptance (APNs + backend trigger).
-* Analytics & telemetry (with privacy controls).
+* Analytics & telemetry (with privacy controls and user consent).
 * Offline queue (buffer sends until P2P established).
 * Theming + accessibility improvements (Dynamic Type, VoiceOver labels for system messages).
 * On‑device LLM assistant (iOS 26+) — local inference chat tab (prototype added).
+* Message expiration timer beyond 24h default.
+* Export/import session configuration (without message history).
 
 ## 13. Troubleshooting
 | Symptom | Possible Cause | Action |
@@ -198,7 +224,12 @@ This is a development / demonstration project. Do not ship to production without
 | Join room | `ChatManager.joinRoom` |
 | Send message | `ChatManager.sendMessage` |
 | Leave room | `ChatManager.leave` |
+| Rename session | `ChatManager.renameSession` |
+| Delete session | `ChatManager.removeSession` |
 | P2P event | `PeerConnectionManagerDelegate` methods |
+| Ephemeral ID management | `DeviceIDManager.shared` |
+| Server purge | `DeviceIDManager.purgeFromServer` |
+| Authentication settings | `AuthenticationSettingsStore.shared` |
 | On‑device LLM chat | `OnDeviceLLMManager` via `LLMView` |
 
 ---
