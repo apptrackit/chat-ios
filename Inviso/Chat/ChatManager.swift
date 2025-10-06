@@ -538,6 +538,7 @@ extension ChatManager {
         case directLAN          // host↔host on same network
         case directReflexive    // srflx / host mix (NAT hole-punched)
         case relayed(server: String?) // TURN relay (server domain/ip if known)
+        case possiblyVPN        // Mixed or unusual candidates suggesting VPN
         case unknown
 
         var displayName: String {
@@ -545,6 +546,7 @@ extension ChatManager {
             case .directLAN: return "Direct LAN"
             case .directReflexive: return "Direct (NAT)"
             case .relayed(let server): return server.map { "Relayed via \($0)" } ?? "Relayed"
+            case .possiblyVPN: return "Direct (Possibly VPN)"
             case .unknown: return "Determining…"
             }
         }
@@ -553,6 +555,7 @@ extension ChatManager {
             case .directLAN: return "LAN"
             case .directReflexive: return "NAT"
             case .relayed: return "RELAY"
+            case .possiblyVPN: return "VPN?"
             case .unknown: return "…"
             }
         }
@@ -561,6 +564,7 @@ extension ChatManager {
             case .directLAN: return "wifi"
             case .directReflexive: return "arrow.left.and.right"
             case .relayed: return "cloud"
+            case .possiblyVPN: return "network.badge.shield.half.filled"
             case .unknown: return "questionmark"
             }
         }
@@ -569,6 +573,7 @@ extension ChatManager {
             case .directLAN: return "green"
             case .directReflexive: return "teal"
             case .relayed: return "orange"
+            case .possiblyVPN: return "purple"
             case .unknown: return "gray"
             }
         }
@@ -619,8 +624,13 @@ extension ChatManager {
                     path = .directLAN
                 } else if allTypes.allSatisfy({ $0 == "host" || $0 == "srflx" }) {
                     path = .directReflexive
-                } else {
+                } else if allTypes.isEmpty {
+                    // No candidate types found - stats might not be ready yet
                     path = .unknown
+                } else {
+                    // Mixed or unusual candidates (e.g., one side has srflx, other has prflx)
+                    // This often indicates VPN or unusual network configuration
+                    path = .possiblyVPN
                 }
                 
                 // Update on main thread
