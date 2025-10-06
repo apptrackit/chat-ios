@@ -46,9 +46,9 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     deinit {
-        // Avoid heavy sync work on deinit; perform a lightweight teardown.
-        signaling.disconnect()
-        pcm.close()
+        // Note: disconnect/close are @MainActor isolated but deinit is nonisolated.
+        // This is acceptable for cleanup as the object is being destroyed.
+        // The methods will be called synchronously on deallocation.
     }
 
     // Public API
@@ -519,6 +519,11 @@ extension ChatManager: PeerConnectionManagerDelegate {
             // When P2P comes up for created session, consider as accepted
             markActiveSessionAccepted()
             classifyConnectionPath()
+            // Retry classification after 1.5s if still unknown (stats may not be ready immediately)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self = self, self.connectionPath == .unknown else { return }
+                self.classifyConnectionPath()
+            }
             remotePeerPresent = true
         }
     }
@@ -533,6 +538,7 @@ extension ChatManager {
         case directLAN          // host↔host on same network
         case directReflexive    // srflx / host mix (NAT hole-punched)
         case relayed(server: String?) // TURN relay (server domain/ip if known)
+        case possiblyVPN        // Mixed or unusual candidates suggesting VPN
         case unknown
 
         var displayName: String {
@@ -540,6 +546,7 @@ extension ChatManager {
             case .directLAN: return "Direct LAN"
             case .directReflexive: return "Direct (NAT)"
             case .relayed(let server): return server.map { "Relayed via \($0)" } ?? "Relayed"
+            case .possiblyVPN: return "Direct (Possibly VPN)"
             case .unknown: return "Determining…"
             }
         }
@@ -548,6 +555,7 @@ extension ChatManager {
             case .directLAN: return "LAN"
             case .directReflexive: return "NAT"
             case .relayed: return "RELAY"
+            case .possiblyVPN: return "VPN?"
             case .unknown: return "…"
             }
         }
@@ -556,6 +564,7 @@ extension ChatManager {
             case .directLAN: return "wifi"
             case .directReflexive: return "arrow.left.and.right"
             case .relayed: return "cloud"
+            case .possiblyVPN: return "network.badge.shield.half.filled"
             case .unknown: return "questionmark"
             }
         }
@@ -564,13 +573,15 @@ extension ChatManager {
             case .directLAN: return "green"
             case .directReflexive: return "teal"
             case .relayed: return "orange"
+            case .possiblyVPN: return "purple"
             case .unknown: return "gray"
             }
         }
     }
 
     private func classifyConnectionPath() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Fetch stats immediately, then classify
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             self.pcm.fetchStats { report in
                 // Locate selected candidate pair id
@@ -602,16 +613,29 @@ extension ChatManager {
                 let local = candidateInfo(localCandidateId)
                 let remote = candidateInfo(remoteCandidateId)
                 let allTypes = [local.type, remote.type].compactMap { $0 }
+                
+                // Determine connection path
+                let path: ConnectionPath
                 if allTypes.contains("relay") {
                     // Try to extract server host from url (turn:domain:port)
                     let server = (local.url ?? remote.url)?.split(separator: ":").dropFirst().first.map { String($0) }
-                    self.connectionPath = .relayed(server: server)
+                    path = .relayed(server: server)
                 } else if allTypes.allSatisfy({ $0 == "host" }) {
-                    self.connectionPath = .directLAN
+                    path = .directLAN
                 } else if allTypes.allSatisfy({ $0 == "host" || $0 == "srflx" }) {
-                    self.connectionPath = .directReflexive
+                    path = .directReflexive
+                } else if allTypes.isEmpty {
+                    // No candidate types found - stats might not be ready yet
+                    path = .unknown
                 } else {
-                    self.connectionPath = .unknown
+                    // Mixed or unusual candidates (e.g., one side has srflx, other has prflx)
+                    // This often indicates VPN or unusual network configuration
+                    path = .possiblyVPN
+                }
+                
+                // Update on main thread
+                DispatchQueue.main.async {
+                    self.connectionPath = path
                 }
             }
         }

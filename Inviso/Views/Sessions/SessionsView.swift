@@ -15,14 +15,6 @@ struct SessionsView: View {
 
     var body: some View {
         content
-            .background(
-                Group {
-                    NavigationLink(destination: ChatView(), isActive: $goToChat) { EmptyView() }.hidden()
-                    if let pendingSession = pendingSelectedSession {
-                        NavigationLink(destination: PendingSessionView(session: pendingSession), isActive: $goToPending) { EmptyView() }.hidden()
-                    }
-                }
-            )
             .navigationTitle("Sessions")
             .signalingToolbar()
             // Removed global scan button – scanning now only in join code context
@@ -32,8 +24,16 @@ struct SessionsView: View {
                 chat.pollPendingAndValidateRooms()
             }
             .onDisappear { isVisible = false }
-            .onChange(of: scenePhase) { _ in
+            .onChange(of: scenePhase) {
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
+            }
+            .navigationDestination(isPresented: $goToChat) {
+                ChatView()
+            }
+            .navigationDestination(isPresented: $goToPending) {
+                if let pendingSession = pendingSelectedSession {
+                    PendingSessionView(session: pendingSession)
+                }
             }
             .onReceive(ticker) { _ in
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }

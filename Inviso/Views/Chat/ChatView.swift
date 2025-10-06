@@ -32,7 +32,7 @@ struct ChatView: View {
                     }
                     .padding(.vertical, 12)
                 }
-                .onChange(of: chat.messages.count) { _ in
+                .onChange(of: chat.messages.count) {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
             }
@@ -154,6 +154,7 @@ struct ChatView: View {
         case .directLAN: return "wifi"
         case .directReflexive: return "arrow.left.and.right"
         case .relayed: return "cloud"
+        case .possiblyVPN: return "network.badge.shield.half.filled"
         case .unknown: return "questionmark"
         }
     }
@@ -162,6 +163,7 @@ struct ChatView: View {
         case .directLAN: return .green
         case .directReflexive: return .teal
         case .relayed: return .orange
+        case .possiblyVPN: return .purple
         case .unknown: return .gray
         }
     }
@@ -170,6 +172,7 @@ struct ChatView: View {
         case .directLAN: return "Lowest latency"
         case .directReflexive: return "NAT optimized"
         case .relayed: return "Relayed (higher latency)"
+        case .possiblyVPN: return "VPN may affect performance"
         case .unknown: return "Resolving path…"
         }
     }
@@ -268,10 +271,9 @@ struct SearchBarField: UIViewRepresentable {
         sb.enablesReturnKeyAutomatically = true
         sb.delegate = context.coordinator
         // Remove magnifying icon
-        if let tf = sb.searchTextField as? UITextField {
-            tf.leftView = nil
-            tf.returnKeyType = .send // Show Send key
-        }
+        let tf = sb.searchTextField
+        tf.leftView = nil
+        tf.returnKeyType = .send // Show Send key
         return sb
     }
 

@@ -139,7 +139,7 @@ final class OnDeviceLLMManager: ObservableObject {
             self.messages.append(ChatMessage(text: "", timestamp: Date(), isFromSelf: false))
         }
         let delay: UInt64 = 10_000_000 // 18ms per char (~55 chars/sec)
-        for (idx, ch) in full.enumerated() {
+        for (_, ch) in full.enumerated() {
             if Task.isCancelled { break }
             if isCancelled { break }
             await MainActor.run {
