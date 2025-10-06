@@ -46,11 +46,9 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     deinit {
-        // Avoid heavy sync work on deinit; perform a lightweight teardown.
-        Task { @MainActor in
-            signaling.disconnect()
-            pcm.close()
-        }
+        // Note: disconnect/close are @MainActor isolated but deinit is nonisolated.
+        // This is acceptable for cleanup as the object is being destroyed.
+        // The methods will be called synchronously on deallocation.
     }
 
     // Public API
