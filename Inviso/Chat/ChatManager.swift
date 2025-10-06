@@ -519,6 +519,11 @@ extension ChatManager: PeerConnectionManagerDelegate {
             // When P2P comes up for created session, consider as accepted
             markActiveSessionAccepted()
             classifyConnectionPath()
+            // Retry classification after 1.5s if still unknown (stats may not be ready immediately)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self = self, self.connectionPath == .unknown else { return }
+                self.classifyConnectionPath()
+            }
             remotePeerPresent = true
         }
     }
@@ -570,7 +575,8 @@ extension ChatManager {
     }
 
     private func classifyConnectionPath() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Fetch stats immediately, then classify
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }
             self.pcm.fetchStats { report in
                 // Locate selected candidate pair id
@@ -602,16 +608,24 @@ extension ChatManager {
                 let local = candidateInfo(localCandidateId)
                 let remote = candidateInfo(remoteCandidateId)
                 let allTypes = [local.type, remote.type].compactMap { $0 }
+                
+                // Determine connection path
+                let path: ConnectionPath
                 if allTypes.contains("relay") {
                     // Try to extract server host from url (turn:domain:port)
                     let server = (local.url ?? remote.url)?.split(separator: ":").dropFirst().first.map { String($0) }
-                    self.connectionPath = .relayed(server: server)
+                    path = .relayed(server: server)
                 } else if allTypes.allSatisfy({ $0 == "host" }) {
-                    self.connectionPath = .directLAN
+                    path = .directLAN
                 } else if allTypes.allSatisfy({ $0 == "host" || $0 == "srflx" }) {
-                    self.connectionPath = .directReflexive
+                    path = .directReflexive
                 } else {
-                    self.connectionPath = .unknown
+                    path = .unknown
+                }
+                
+                // Update on main thread
+                DispatchQueue.main.async {
+                    self.connectionPath = path
                 }
             }
         }
