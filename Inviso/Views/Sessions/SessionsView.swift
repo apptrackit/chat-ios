@@ -12,6 +12,7 @@ struct SessionsView: View {
     @State private var isVisible = false
     @State private var ticker = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
     @State private var showQRForSession: ChatSession? = nil
+    @State private var showAboutForSession: ChatSession? = nil
 
     var body: some View {
         content
@@ -56,14 +57,14 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    // Active & Waiting Sessions (sorted by lastActivityDate)
+                    // Contacts (sorted by lastActivityDate)
                     if !activeSessions.isEmpty {
                         Section {
                             ForEach(activeSessions, id: \.id) { session in
                                 sessionRow(session)
                             }
                         } header: {
-                            Text("Active & Waiting")
+                            Text("Contacts")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.primary)
                                 .textCase(nil)
@@ -102,6 +103,12 @@ struct SessionsView: View {
                 }
                 .padding()
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showQRForSession = nil } } }
+            }
+        }
+        .sheet(item: $showAboutForSession) { sess in
+            NavigationView {
+                SessionAboutView(session: sess)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showAboutForSession = nil } } }
             }
         }
     }
@@ -170,6 +177,9 @@ struct SessionsView: View {
             Button {
                 promptRename(session)
             } label: { Label("Rename", systemImage: "pencil") }
+            Button {
+                showAboutForSession = session
+            } label: { Label("About", systemImage: "info.circle") }
             if let rid = session.roomId {
                 Button(role: .destructive) {
                     Task { await chat.deleteRoomOnServer(roomId: rid) }
