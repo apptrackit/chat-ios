@@ -246,7 +246,7 @@ class ChatManager: NSObject, ObservableObject {
         // Register ephemeral ID
         DeviceIDManager.shared.registerEphemeralID(session.ephemeralDeviceId, sessionName: name, code: code)
         persistSessions()
-        Task { await createPendingOnServer(session: session) }
+        Task { await createPendingOnServer(session: session, originalMinutes: minutes) }
         return session
     }
 
@@ -303,15 +303,15 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     // MARK: - Backend REST integration
-    private func createPendingOnServer(session: ChatSession) async {
+    private func createPendingOnServer(session: ChatSession, originalMinutes: Int) async {
         let joinid = session.code
-        let expISO: String
-        if let exp = session.expiresAt { expISO = ISO8601DateFormatter().string(from: exp) } else { expISO = ISO8601DateFormatter().string(from: Date().addingTimeInterval(300)) }
+        // Use original minutes value directly (more accurate than recalculating)
+        let expiresInSeconds = originalMinutes * 60
         let client1 = session.ephemeralDeviceId // Use ephemeral ID for privacy
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["joinid": joinid, "exp": expISO, "client1": client1]
+        let body: [String: Any] = ["joinid": joinid, "expiresInSeconds": expiresInSeconds, "client1": client1]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do { _ = try await URLSession.shared.data(for: req) } catch { print("createPending error: \(error)") }
     }
