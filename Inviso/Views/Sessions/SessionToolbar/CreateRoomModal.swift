@@ -16,6 +16,7 @@ struct CreateRoomModal: View {
     @State private var showCreateResult = false
     @State private var createdCode: String = ""
     @State private var showCreatedQRCode = false
+    @State private var showCopied = false
 
     var body: some View {
         ZStack {
@@ -29,10 +30,11 @@ struct CreateRoomModal: View {
                 }
 
             VStack(spacing: 14) {
-                if showCreateResult == false {
-                    Text("Create Room")
-                        .font(.headline)
-                        .foregroundColor(.primary)
+                if !showCreatedQRCode {
+                    if showCreateResult == false {
+                        Text("Create Room")
+                            .font(.headline)
+                            .foregroundColor(.primary)
 
                     // Room name
                     VStack(alignment: .leading, spacing: 6) {
@@ -97,58 +99,110 @@ struct CreateRoomModal: View {
                         }
                         .buttonStyle(.glass)
                     }
+                    } else {
+                        // Result: show code + copy
+                        Text("Room Created")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        
+                        if roomName.isEmpty == false {
+                            Text("\(roomName)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        HStack(spacing: 8) {
+                            ForEach(0..<6, id: \.self) { idx in
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(Color.white.opacity(0.15))
+                                    Text(String(createdCode[createdCode.index(createdCode.startIndex, offsetBy: idx)]))
+                                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                                }
+                                .frame(width: 48, height: 56)
+                            }
+                        }
+                        
+                        Button {
+                            UIPasteboard.general.string = createdCode
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                showCopied = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                    showCopied = false
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                                    .font(.body.weight(.semibold))
+                                    .contentTransition(.symbolEffect(.replace))
+                                Text(showCopied ? "Copied!" : "Copy code")
+                                    .font(.body.weight(.semibold))
+                            }
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.top, 6)
+                        
+                        Button {
+                            withAnimation(.spring()) { showCreatedQRCode = true }
+                        } label: {
+                            Label("Show QR", systemImage: "qrcode")
+                                .font(.body.weight(.semibold))
+                        }
+                        .buttonStyle(.glass)
+                        .padding(.top, 2)
+
+                        Button("Done") {
+                            withAnimation(.spring()) {
+                                isPresented = false
+                                showCreateResult = false
+                                roomName = ""
+                                durationMinutes = 5
+                                createdCode = ""
+                            }
+                        }
+                        .padding(.top, 4)
+                    }
                 } else {
-                    // Result: show code + copy
-                    Text("Room Created")
+                    // QR Code View
+                    Text("Share Join Code")
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    if roomName.isEmpty == false {
-                        Text("\(roomName)")
-                            .font(.subheadline)
+                    if createdCode.count == 6 {
+                        QRCodeView(value: "inviso://join/\(createdCode)", size: 260)
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .fill(Color.white)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                            )
+                            .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+                        
+                        Text(createdCode)
+                            .font(.system(.title3, design: .monospaced).weight(.semibold))
+                            .foregroundColor(.primary)
+                            .padding(.top, 8)
+                        
+                        Text("inviso://join/\(createdCode)")
+                            .font(.caption.monospaced())
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    } else {
+                        ProgressView()
+                            .padding()
                     }
                     
-                    HStack(spacing: 8) {
-                        ForEach(0..<6, id: \.self) { idx in
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(.ultraThinMaterial)
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.15))
-                                Text(String(createdCode[createdCode.index(createdCode.startIndex, offsetBy: idx)]))
-                                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                            }
-                            .frame(width: 48, height: 56)
-                        }
-                    }
-                    
-                    Button {
-                        UIPasteboard.general.string = createdCode
-                    } label: {
-                        Label("Copy code", systemImage: "doc.on.doc")
-                            .font(.body.weight(.semibold))
-                    }
-                    .buttonStyle(.glass)
-                    .padding(.top, 6)
-                    
-                    Button {
-                        showCreatedQRCode = true
-                    } label: {
-                        Label("Show QR", systemImage: "qrcode")
-                            .font(.body.weight(.semibold))
-                    }
-                    .buttonStyle(.glass)
-                    .padding(.top, 2)
-
-                    Button("Done") {
-                        withAnimation(.spring()) {
-                            isPresented = false
-                            showCreateResult = false
-                            roomName = ""
-                            durationMinutes = 5
-                            createdCode = ""
-                        }
+                    Button("Back") {
+                        withAnimation(.spring()) { showCreatedQRCode = false }
                     }
                     .padding(.top, 4)
                 }
@@ -182,25 +236,6 @@ struct CreateRoomModal: View {
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showCreatedQRCode) {
-            VStack(spacing: 16) {
-                Text("Share Join Code")
-                    .font(.headline)
-                if createdCode.count == 6 {
-                    QRCodeView(value: "inviso://join/\(createdCode)")
-                        .frame(width: 220, height: 220)
-                        .padding()
-                    Text(createdCode)
-                        .font(.system(.title3, design: .monospaced).weight(.semibold))
-                        .padding(.bottom, 4)
-                } else {
-                    ProgressView()
-                }
-                Button("Close") { showCreatedQRCode = false }
-                    .buttonStyle(.glass)
-            }
-            .padding()
         }
     }
 

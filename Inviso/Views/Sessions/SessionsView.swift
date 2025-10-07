@@ -198,20 +198,25 @@ struct SessionsView: View {
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
-        .sheet(item: $showQRForSession) { sess in
-            NavigationView {
-                VStack(spacing: 24) {
-                    Text(sess.displayName)
-                        .font(.headline)
-                    QRCodeView(value: "inviso://join/" + sess.code, size: 240)
-                        .padding()
-                    Text("inviso://join/" + sess.code)
-                        .font(.footnote.monospaced())
-                        .foregroundColor(.secondary)
-                    Spacer()
+        .overlay {
+            if let sess = showQRForSession {
+                QRCodeModal(session: sess, isPresented: Binding(
+                    get: { showQRForSession != nil },
+                    set: { if !$0 { showQRForSession = nil } }
+                ))
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .zIndex(999)
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showQRForSession != nil)
+        .onChange(of: chat.sessions) {
+            // Auto-close QR modal when session becomes accepted or expired
+            if let qrSession = showQRForSession {
+                if let updated = chat.sessions.first(where: { $0.id == qrSession.id }) {
+                    if updated.status == .accepted || updated.status == .expired {
+                        withAnimation(.spring()) { showQRForSession = nil }
+                    }
                 }
-                .padding()
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showQRForSession = nil } } }
             }
         }
         .sheet(item: $showAboutForSession) { sess in
