@@ -88,6 +88,10 @@ class ChatManager: NSObject, ObservableObject {
     if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
     if isEphemeral { messages.removeAll() }
         self.roomId = roomId
+        // Update activity for the session being joined
+        if let sessionId = sessions.first(where: { $0.roomId == roomId })?.id {
+            updateSessionActivity(sessionId)
+        }
         signaling.send(["type": "join_room", "roomId": roomId])
     }
 
@@ -119,7 +123,13 @@ class ChatManager: NSObject, ObservableObject {
     func sendMessage(_ text: String) {
         guard isP2PConnected else { return }
         let ok = pcm.send(text)
-        if ok { messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true)) }
+        if ok {
+            messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true))
+            // Update activity for active session
+            if let sessionId = activeSessionId {
+                updateSessionActivity(sessionId)
+            }
+        }
     }
 
     // MARK: - Full local reset for Settings > Erase All Data
@@ -268,6 +278,16 @@ class ChatManager: NSObject, ObservableObject {
 
     func selectSession(_ session: ChatSession) {
         activeSessionId = session.id
+    }
+
+    /// Updates lastActivityDate for a session and moves it to top of list
+    func updateSessionActivity(_ sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[idx].lastActivityDate = Date()
+        // Move to top of list by removing and reinserting
+        let session = sessions.remove(at: idx)
+        sessions.insert(session, at: 0)
+        persistSessions()
     }
 
     func renameSession(_ session: ChatSession, newName: String?) {
@@ -548,6 +568,10 @@ extension ChatManager: PeerConnectionManagerDelegate {
     }
     func pcmDidReceiveMessage(_ text: String) {
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
+        // Update activity for active session when receiving messages
+        if let sessionId = activeSessionId {
+            updateSessionActivity(sessionId)
+        }
     }
 }
 

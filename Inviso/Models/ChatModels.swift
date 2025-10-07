@@ -37,20 +37,42 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var roomId: String? // backend room id once accepted
     var createdAt: Date
     var expiresAt: Date?
+    var lastActivityDate: Date // Tracks last interaction (create, join, message) for sorting
     var status: SessionStatus
     var isCreatedByMe: Bool
     var ephemeralDeviceId: String // Unique per-session identifier for privacy
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString) {
         self.id = id
         self.name = name
         self.code = code
         self.roomId = roomId
         self.createdAt = createdAt
         self.expiresAt = expiresAt
+        self.lastActivityDate = lastActivityDate
         self.status = status
         self.isCreatedByMe = isCreatedByMe
         self.ephemeralDeviceId = ephemeralDeviceId
+    }
+    
+    // Custom Codable for backward compatibility
+    enum CodingKeys: String, CodingKey {
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, status, isCreatedByMe, ephemeralDeviceId
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        code = try container.decode(String.self, forKey: .code)
+        roomId = try container.decodeIfPresent(String.self, forKey: .roomId)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
+        // Fallback to createdAt if lastActivityDate is missing (backward compatibility)
+        lastActivityDate = try container.decodeIfPresent(Date.self, forKey: .lastActivityDate) ?? container.decode(Date.self, forKey: .createdAt)
+        status = try container.decode(SessionStatus.self, forKey: .status)
+        isCreatedByMe = try container.decode(Bool.self, forKey: .isCreatedByMe)
+        ephemeralDeviceId = try container.decode(String.self, forKey: .ephemeralDeviceId)
     }
 
     var displayName: String {

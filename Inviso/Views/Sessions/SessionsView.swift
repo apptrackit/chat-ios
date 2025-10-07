@@ -56,58 +56,31 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(chat.sessions, id: \.id) { session in
-                        Button {
-                            // Block interactions that cause network join when offline
-                            guard chat.connectionStatus == .connected else { return }
-                            // Block interaction for expired sessions
-                            guard session.status != .expired else { return }
-                            chat.selectSession(session)
-                            if session.status == .pending {
-                                goToPending = true
-                            } else if let rid = session.roomId { // accepted
-                                chat.joinRoom(roomId: rid)
-                                goToChat = true
+                    // Active & Waiting Sessions (sorted by lastActivityDate)
+                    if !activeSessions.isEmpty {
+                        Section {
+                            ForEach(activeSessions, id: \.id) { session in
+                                sessionRow(session)
                             }
-                        } label: {
-                            HStack(spacing: 12) {
-                                statusDot(for: session)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(session.displayName)
-                                        .font(.body.weight(.semibold))
-                                    subtitleView(for: session)
-                                }
-                                Spacer()
-                                if session.status == .pending {
-                                    Button {
-                                        showQRForSession = session
-                                    } label: {
-                                        Image(systemName: "qrcode")
-                                            .font(.footnote)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundColor(Color(UIColor.tertiaryLabel))
-                            }
+                        } header: {
+                            Text("Active & Waiting")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primary)
+                                .textCase(nil)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(chat.connectionStatus != .connected && session.status != .pending)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                chat.removeSession(session)
-                            } label: { Label("Delete", systemImage: "trash") }
-                        }
-                        .contextMenu {
-                            Button {
-                                promptRename(session)
-                            } label: { Label("Rename", systemImage: "pencil") }
-                            if let rid = session.roomId {
-                                Button(role: .destructive) {
-                                    Task { await chat.deleteRoomOnServer(roomId: rid) }
-                                } label: { Label("Delete on server", systemImage: "xmark.bin") }
+                    }
+                    
+                    // Closed & Expired Sessions (sorted by lastActivityDate)
+                    if !inactiveSessions.isEmpty {
+                        Section {
+                            ForEach(inactiveSessions, id: \.id) { session in
+                                sessionRow(session)
                             }
+                        } header: {
+                            Text("Closed & Expired")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.secondary)
+                                .textCase(nil)
                         }
                     }
                 }
@@ -132,6 +105,80 @@ struct SessionsView: View {
             }
         }
     }
+    
+    // MARK: - Session Categorization
+    
+    private var activeSessions: [ChatSession] {
+        chat.sessions
+            .filter { $0.status == .pending || $0.status == .accepted }
+            .sorted { $0.lastActivityDate > $1.lastActivityDate }
+    }
+    
+    private var inactiveSessions: [ChatSession] {
+        chat.sessions
+            .filter { $0.status == .closed || $0.status == .expired }
+            .sorted { $0.lastActivityDate > $1.lastActivityDate }
+    }
+    
+    // MARK: - Session Row
+    
+    @ViewBuilder
+    private func sessionRow(_ session: ChatSession) -> some View {
+        Button {
+            // Block interactions that cause network join when offline
+            guard chat.connectionStatus == .connected else { return }
+            // Block interaction for expired sessions
+            guard session.status != .expired else { return }
+            chat.selectSession(session)
+            if session.status == .pending {
+                goToPending = true
+            } else if let rid = session.roomId { // accepted
+                chat.joinRoom(roomId: rid)
+                goToChat = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                statusDot(for: session)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.displayName)
+                        .font(.body.weight(.semibold))
+                    subtitleView(for: session)
+                }
+                Spacer()
+                if session.status == .pending {
+                    Button {
+                        showQRForSession = session
+                    } label: {
+                        Image(systemName: "qrcode")
+                            .font(.footnote)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(Color(UIColor.tertiaryLabel))
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(chat.connectionStatus != .connected && session.status != .pending)
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                chat.removeSession(session)
+            } label: { Label("Delete", systemImage: "trash") }
+        }
+        .contextMenu {
+            Button {
+                promptRename(session)
+            } label: { Label("Rename", systemImage: "pencil") }
+            if let rid = session.roomId {
+                Button(role: .destructive) {
+                    Task { await chat.deleteRoomOnServer(roomId: rid) }
+                } label: { Label("Delete on server", systemImage: "xmark.bin") }
+            }
+        }
+    }
+    
+    // MARK: - Status Indicators
 
     private func statusDot(for s: ChatSession) -> some View {
         let color: Color = {
