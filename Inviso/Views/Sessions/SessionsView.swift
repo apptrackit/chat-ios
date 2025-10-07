@@ -13,6 +13,7 @@ struct SessionsView: View {
     @State private var ticker = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
     @State private var showQRForSession: ChatSession? = nil
     @State private var showAboutForSession: ChatSession? = nil
+    @State private var showClearAllConfirmation = false
 
     var body: some View {
         content
@@ -78,10 +79,24 @@ struct SessionsView: View {
                                 sessionRow(session)
                             }
                         } header: {
-                            Text("Closed & Expired")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.secondary)
-                                .textCase(nil)
+                            HStack {
+                                Text("Closed & Expired")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                                    .textCase(nil)
+                                
+                                Spacer()
+                                
+                                Button {
+                                    showClearAllConfirmation = true
+                                } label: {
+                                    Text("Clear All")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.red)
+                                        .textCase(nil)
+                                }
+                            }
+                            .padding(.trailing, 4)
                         }
                     }
                 }
@@ -110,6 +125,14 @@ struct SessionsView: View {
                 SessionAboutView(session: sess)
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showAboutForSession = nil } } }
             }
+        }
+        .alert("Clear All Closed & Expired?", isPresented: $showClearAllConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear All", role: .destructive) {
+                clearAllInactiveSessions()
+            }
+        } message: {
+            Text("This will permanently delete all closed and expired sessions. This action cannot be undone.")
         }
     }
     
@@ -257,6 +280,13 @@ extension SessionsView {
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let root = scene.keyWindow?.rootViewController {
             root.present(alert, animated: true)
+        }
+    }
+    
+    private func clearAllInactiveSessions() {
+        let sessionsToRemove = inactiveSessions
+        for session in sessionsToRemove {
+            chat.removeSession(session)
         }
     }
 }
