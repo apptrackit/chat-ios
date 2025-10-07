@@ -18,6 +18,29 @@ enum ContactsSortMode: String {
     }
 }
 
+enum SortDirection {
+    case descending // Newest first
+    case ascending  // Oldest first
+    
+    var icon: String {
+        switch self {
+        case .descending: return "arrow.down"
+        case .ascending: return "arrow.up"
+        }
+    }
+    
+    var label: String {
+        switch self {
+        case .descending: return "Newest First"
+        case .ascending: return "Oldest First"
+        }
+    }
+    
+    mutating func toggle() {
+        self = self == .descending ? .ascending : .descending
+    }
+}
+
 struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
     @Environment(\.scenePhase) private var scenePhase
@@ -31,6 +54,7 @@ struct SessionsView: View {
     @State private var showAboutForSession: ChatSession? = nil
     @State private var showClearAllConfirmation = false
     @State private var contactsSortMode: ContactsSortMode = .lastActivity
+    @State private var sortDirection: SortDirection = .descending
 
     var body: some View {
         content
@@ -90,27 +114,49 @@ struct SessionsView: View {
                                 
                                 Spacer()
                                 
-                                Button {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                        contactsSortMode.toggle()
+                                HStack(spacing: 6) {
+                                    // Sort Mode Button
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            contactsSortMode.toggle()
+                                        }
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: contactsSortMode.icon)
+                                                .font(.caption)
+                                            Text(contactsSortMode.rawValue)
+                                                .font(.caption.weight(.medium))
+                                        }
+                                        .foregroundColor(.accentColor)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            Capsule()
+                                                .fill(Color.accentColor.opacity(0.12))
+                                        )
                                     }
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: contactsSortMode.icon)
-                                            .font(.caption)
-                                        Text(contactsSortMode.rawValue)
-                                            .font(.caption.weight(.medium))
+                                    .buttonStyle(.plain)
+                                    .transition(.scale.combined(with: .opacity))
+                                    
+                                    // Sort Direction Button
+                                    Button {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            sortDirection.toggle()
+                                        }
+                                    } label: {
+                                        Image(systemName: sortDirection.icon)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(.accentColor)
+                                            .frame(width: 24, height: 24)
+                                            .background(
+                                                Circle()
+                                                    .fill(Color.accentColor.opacity(0.12))
+                                            )
                                     }
-                                    .foregroundColor(.accentColor)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color.accentColor.opacity(0.12))
-                                    )
+                                    .buttonStyle(.plain)
+                                    .rotationEffect(.degrees(sortDirection == .descending ? 0 : 180))
+                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: sortDirection)
                                 }
-                                .buttonStyle(.plain)
-                                .transition(.scale.combined(with: .opacity))
                             }
                             .padding(.trailing, 4)
                         }
@@ -184,12 +230,24 @@ struct SessionsView: View {
     
     private var activeSessions: [ChatSession] {
         let filtered = chat.sessions.filter { $0.status == .pending || $0.status == .accepted }
+        let sorted: [ChatSession]
+        
         switch contactsSortMode {
         case .lastActivity:
-            return filtered.sorted { $0.lastActivityDate > $1.lastActivityDate }
+            sorted = filtered.sorted { 
+                sortDirection == .descending 
+                    ? $0.lastActivityDate > $1.lastActivityDate 
+                    : $0.lastActivityDate < $1.lastActivityDate 
+            }
         case .created:
-            return filtered.sorted { $0.createdAt > $1.createdAt }
+            sorted = filtered.sorted { 
+                sortDirection == .descending 
+                    ? $0.createdAt > $1.createdAt 
+                    : $0.createdAt < $1.createdAt 
+            }
         }
+        
+        return sorted
     }
     
     private var inactiveSessions: [ChatSession] {
