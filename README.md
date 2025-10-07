@@ -62,7 +62,25 @@ SwiftUI Views (ChatView, SessionsView, etc.)
 | SwiftUI Views | Render real‑time state and dispatch user intents (create session, send message, leave room). |
 
 ## 4. Session & Connection Lifecycle
-1. User creates a session → `ChatSession(status: .pending)` stored locally and POST `/api/rooms` with join code + expiry.
+
+### Expiry System
+**Server-Side Calculation:** The app sends duration in seconds (`expiresInSeconds`) instead of calculating expiry dates locally. The server calculates the exact expiry timestamp based on its own clock, eliminating clock skew issues between devices.
+
+**Duration Values:**
+- 1 minute = `60` seconds
+- 5 minutes = `300` seconds
+- 1 hour = `3600` seconds
+- 12 hours = `43200` seconds
+- 24 hours = `86400` seconds
+
+**Benefits:**
+- ✅ No clock skew between devices
+- ✅ Server is source of truth for expiry
+- ✅ Automatic cleanup at database level
+- ✅ Expired sessions cannot be joined
+
+### Connection Flow
+1. User creates a session → `ChatSession(status: .pending)` stored locally and POST `/api/rooms` with join code + `expiresInSeconds`.
 2. Remote peer enters the join code → backend pairs clients → returns `roomid` to second peer; first peer polls (`checkPendingOnServer`) until accepted.
 3. When both sides have the `roomId`, the UI triggers `joinRoom(roomId:)` → signaling server orchestrates who is initiator.
 4. Initiator creates `RTCPeerConnection` + DataChannel → creates SDP offer → sent over WebSocket.
@@ -151,13 +169,62 @@ Prerequisites: Xcode 15+, iOS 15+ target.
 Add this repo as a remote Swift Package and depend on target `Inviso`. Instantiate `ChatManager()` and inject into your SwiftUI environment.
 
 ## 11. Configuration
-Edit inside `ChatManager`:
+
+### Server Configuration
+The app dynamically configures server endpoints via `ServerConfig.shared.host`:
 ```swift
-// Now dynamically configured via ServerConfig.shared.host
-// Example: let signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
-//          let apiBase = URL(string: "http://\(ServerConfig.shared.host)")!
+// Signaling WebSocket
+let signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+
+// REST API
+let apiBase = URL(string: "https://\(ServerConfig.shared.host)")!
 ```
-Change ICE servers in `PeerConnectionManager.createPeerConnection`.
+
+Change server host at runtime via Settings → Server Configuration.
+
+### REST API Integration
+The app communicates with the backend REST API for session coordination:
+
+**Create Pending Session (Client1):**
+```swift
+// POST /api/rooms
+{
+  "joinid": "123456",
+  "expiresInSeconds": 300,  // Duration in seconds
+  "client1": "ephemeral-device-id"
+}
+```
+
+**Accept Session (Client2):**
+```swift
+// POST /api/rooms/accept
+{
+  "joinid": "123456",
+  "client2": "ephemeral-device-id"
+}
+// Returns: { "roomid": "abc123..." }
+```
+
+**Check Status (Client1 polling):**
+```swift
+// POST /api/rooms/check
+{
+  "joinid": "123456",
+  "client1": "ephemeral-device-id"
+}
+// Returns: 204 (pending) or 200 { "roomid": "..." } (accepted)
+```
+
+### ICE Server Configuration
+Change STUN/TURN servers in `PeerConnectionManager.createPeerConnection`:
+```swift
+let iceServers = [
+    RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
+    RTCIceServer(urlStrings: ["turn:your-turn-server:3478"], 
+                 username: "user", 
+                 credential: "pass")
+]
+```
 
 Environment‑driven config can be introduced by wrapping these in a struct injected at init.
 

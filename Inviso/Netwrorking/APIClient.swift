@@ -12,13 +12,12 @@ final class APIClient {
 
     // MARK: - Room Management
 
-    func createRoom(joinCode: String, expiration: Date, clientID: String) async throws {
-        let expISO = ISO8601DateFormatter().string(from: expiration)
+    func createRoom(joinCode: String, expiresInSeconds: Int, clientID: String) async throws {
         var request = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = ["joinid": joinCode, "exp": expISO, "client1": clientID]
+        let body: [String: Any] = ["joinid": joinCode, "expiresInSeconds": expiresInSeconds, "client1": clientID]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (_, _) = try await URLSession.shared.data(for: request)
