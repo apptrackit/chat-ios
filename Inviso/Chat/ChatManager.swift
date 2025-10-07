@@ -36,6 +36,9 @@ class ChatManager: NSObject, ObservableObject {
     private var hadP2POnce = false
     // Deep link join waiting confirmation
     @Published var pendingDeepLinkCode: String? = nil
+    // ChatView lifecycle tracking to defer P2P connection
+    private(set) var isChatViewActive = false
+    private var pendingRoomReadyIsInitiator: Bool?
 
     override init() {
     self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
@@ -65,6 +68,8 @@ class ChatManager: NSObject, ObservableObject {
         clientId = nil
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
+        isChatViewActive = false
+        pendingRoomReadyIsInitiator = nil
     }
 
     // Change server host at runtime. Disconnects current signaling and rebuilds client.
@@ -88,6 +93,10 @@ class ChatManager: NSObject, ObservableObject {
     if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
     if isEphemeral { messages.removeAll() }
         self.roomId = roomId
+        // Update activity for the session being joined
+        if let sessionId = sessions.first(where: { $0.roomId == roomId })?.id {
+            updateSessionActivity(sessionId)
+        }
         signaling.send(["type": "join_room", "roomId": roomId])
     }
 
@@ -99,6 +108,8 @@ class ChatManager: NSObject, ObservableObject {
         pcm.close()
         isP2PConnected = false
     remotePeerPresent = false
+        // Clear any pending room_ready that wasn't processed
+        pendingRoomReadyIsInitiator = nil
         // Send leave to server and clear local room immediately.
         isAwaitingLeaveAck = true
         signaling.send(["type": "leave_room"])        
@@ -119,7 +130,33 @@ class ChatManager: NSObject, ObservableObject {
     func sendMessage(_ text: String) {
         guard isP2PConnected else { return }
         let ok = pcm.send(text)
-        if ok { messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true)) }
+        if ok {
+            messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true))
+            // Update activity for active session
+            if let sessionId = activeSessionId {
+                updateSessionActivity(sessionId)
+            }
+        }
+    }
+
+    // MARK: - ChatView Lifecycle Management
+    /// Called when ChatView appears. If we have a pending room_ready, process it now.
+    func chatViewDidAppear() {
+        isChatViewActive = true
+        if let isInitiator = pendingRoomReadyIsInitiator {
+            pendingRoomReadyIsInitiator = nil
+            handleRoomReady(isInitiator: isInitiator)
+        }
+    }
+
+    /// Called when ChatView disappears. Clears the active flag.
+    func chatViewDidDisappear() {
+        isChatViewActive = false
+        // If user left before P2P was established, clear pending room_ready
+        // This prevents auto-connecting when they return later
+        if pendingRoomReadyIsInitiator != nil && !isP2PConnected {
+            pendingRoomReadyIsInitiator = nil
+        }
     }
 
     // MARK: - Full local reset for Settings > Erase All Data
@@ -164,7 +201,7 @@ class ChatManager: NSObject, ObservableObject {
         // Validate 6-digit pattern
         guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return }
         // If already have an accepted or pending session with this code, select it
-        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
             // If already accepted and have roomId, join room automatically
             if let rid = existing.roomId { joinRoom(roomId: rid) }
@@ -205,7 +242,7 @@ class ChatManager: NSObject, ObservableObject {
         guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return false }
         
         // If already have an accepted or pending session with this code, select it
-        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
             // If already accepted and have roomId, join room automatically
             if let rid = existing.roomId { joinRoom(roomId: rid) }
@@ -254,12 +291,21 @@ class ChatManager: NSObject, ObservableObject {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         if sessions[idx].status != .accepted {
             sessions[idx].status = .accepted
+            // Set first connected timestamp if not already set
+            if sessions[idx].firstConnectedAt == nil {
+                sessions[idx].firstConnectedAt = Date()
+            }
+            persistSessions()
         }
     }
 
     func closeActiveSession() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].status = .closed
+        // Set closed timestamp
+        if sessions[idx].closedAt == nil {
+            sessions[idx].closedAt = Date()
+        }
         activeSessionId = nil
     // If room exists, call backend delete
     if let rid = sessions[idx].roomId { Task { await deleteRoomOnServer(roomId: rid) } }
@@ -268,6 +314,16 @@ class ChatManager: NSObject, ObservableObject {
 
     func selectSession(_ session: ChatSession) {
         activeSessionId = session.id
+    }
+
+    /// Updates lastActivityDate for a session and moves it to top of list
+    func updateSessionActivity(_ sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        sessions[idx].lastActivityDate = Date()
+        // Move to top of list by removing and reinserting
+        let session = sessions.remove(at: idx)
+        sessions.insert(session, at: 0)
+        persistSessions()
     }
 
     func renameSession(_ session: ChatSession, newName: String?) {
@@ -333,7 +389,14 @@ class ChatManager: NSObject, ObservableObject {
         return nil
     }
 
-    func checkPendingOnServer(session: ChatSession) async -> String? {
+    enum PendingCheckResult {
+        case accepted(roomId: String)
+        case stillPending
+        case expired
+        case error
+    }
+
+    func checkPendingOnServer(session: ChatSession) async -> PendingCheckResult {
         let client1 = session.ephemeralDeviceId
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/check"))
         req.httpMethod = "POST"
@@ -341,12 +404,17 @@ class ChatManager: NSObject, ObservableObject {
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": session.code, "client1": client1])
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return nil }
-            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { return rid }
-            if http.statusCode == 204 { return nil }
-            if http.statusCode == 404 { return nil }
+            guard let http = resp as? HTTPURLResponse else { return .error }
+            if http.statusCode == 200 {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String {
+                    return .accepted(roomId: rid)
+                }
+                return .error
+            }
+            if http.statusCode == 204 { return .stillPending }
+            if http.statusCode == 404 { return .expired }
         } catch { print("checkPending error: \(error)") }
-        return nil
+        return .error
     }
 
     func getRoom(roomId: String) async -> (client1: String, client2: String)? {
@@ -378,10 +446,21 @@ class ChatManager: NSObject, ObservableObject {
             for i in sessions.indices {
                 let s = sessions[i]
                 if s.status == .pending {
-                    if let rid = await checkPendingOnServer(session: s) {
+                    let result = await checkPendingOnServer(session: s)
+                    switch result {
+                    case .accepted(let roomId):
                         sessions[i].status = .accepted
-                        sessions[i].roomId = rid
+                        sessions[i].roomId = roomId
+                        // Set first connected timestamp if not already set
+                        if sessions[i].firstConnectedAt == nil {
+                            sessions[i].firstConnectedAt = Date()
+                        }
                         persistSessions()
+                    case .expired:
+                        sessions[i].status = .expired
+                        persistSessions()
+                    case .stillPending, .error:
+                        break // Keep current state
                     }
                 }
             }
@@ -395,6 +474,10 @@ class ChatManager: NSObject, ObservableObject {
                     case .notFound:
                         sessions[i].status = .closed
                         sessions[i].roomId = nil
+                        // Set closed timestamp if not already set
+                        if sessions[i].closedAt == nil {
+                            sessions[i].closedAt = Date()
+                        }
                         persistSessions()
                     case .unreachable:
                         // Do nothing; keep current state. We'll re-validate when back online.
@@ -403,7 +486,7 @@ class ChatManager: NSObject, ObservableObject {
                 }
             }
             // 3) Prune ephemeral IDs for closed/removed sessions
-            let activeEphemeralIDs = Set(sessions.filter { $0.status != .closed }.map { $0.ephemeralDeviceId })
+            let activeEphemeralIDs = Set(sessions.filter { $0.status != .closed && $0.status != .expired }.map { $0.ephemeralDeviceId })
             DeviceIDManager.shared.pruneEphemeralIDs(activeSessionIDs: activeEphemeralIDs)
         }
     }
@@ -424,6 +507,20 @@ class ChatManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - P2P Connection Handling
+    /// Establishes the WebRTC peer connection when room is ready
+    private func handleRoomReady(isInitiator: Bool) {
+        pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
+        if isInitiator {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.pcm.createOffer { sdp in
+                    guard let sdp = sdp else { return }
+                    self.signaling.send(["type": "webrtc_offer", "sdp": sdp.sdp])
+                }
+            }
+        }
+    }
+
     // Internal
     private func handleServerMessage(_ json: [String: Any]) {
         guard let type = json["type"] as? String else { return }
@@ -434,16 +531,16 @@ class ChatManager: NSObject, ObservableObject {
             hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
-            pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
-            if isInitiator {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.pcm.createOffer { sdp in
-                        guard let sdp = sdp else { return }
-                        self.signaling.send(["type": "webrtc_offer", "sdp": sdp.sdp])
-                    }
-                }
+            // Only establish P2P connection if ChatView is active
+            if isChatViewActive {
+                handleRoomReady(isInitiator: isInitiator)
+            } else {
+                // Queue for later processing when ChatView appears
+                pendingRoomReadyIsInitiator = isInitiator
             }
         case "webrtc_offer":
+            // Only process WebRTC offer if ChatView is active
+            guard isChatViewActive else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let offer = RTCSessionDescription(type: .offer, sdp: sdp)
             if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false, customHost: ServerConfig.shared.host) }
@@ -452,10 +549,14 @@ class ChatManager: NSObject, ObservableObject {
                 self.signaling.send(["type": "webrtc_answer", "sdp": answer.sdp])
             }
         case "webrtc_answer":
+            // Only process if we have a peer connection (means we're the initiator who sent offer)
+            guard pcm.pc != nil else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let answer = RTCSessionDescription(type: .answer, sdp: sdp)
             self.pcm.setRemoteAnswer(answer) { _ in }
         case "ice_candidate":
+            // Only process ICE candidates if we have a peer connection
+            guard pcm.pc != nil else { return }
             guard let c = json["candidate"] as? [String: Any],
                   let sdp = c["candidate"] as? String,
                   let idx = c["sdpMLineIndex"] as? Int32,
@@ -529,6 +630,10 @@ extension ChatManager: PeerConnectionManagerDelegate {
     }
     func pcmDidReceiveMessage(_ text: String) {
         messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: false))
+        // Update activity for active session when receiving messages
+        if let sessionId = activeSessionId {
+            updateSessionActivity(sessionId)
+        }
     }
 }
 

@@ -15,6 +15,7 @@ struct PendingSessionView: View {
     @State private var showRenameAlert = false
     @State private var renameText: String = ""
     @State private var showQR = false
+    @State private var showCopied = false
 
     var body: some View {
         VStack(spacing: 18) {
@@ -39,6 +40,14 @@ struct PendingSessionView: View {
                 .accessibilityLabel("Rename")
             }
         }
+        .overlay {
+            if showQR {
+                QRCodeModal(session: session, isPresented: $showQR)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                    .zIndex(999)
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showQR)
         .onAppear {
             isVisible = true
             chat.pollPendingAndValidateRooms()
@@ -58,18 +67,6 @@ struct PendingSessionView: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .sheet(isPresented: $showQR) {
-            NavigationStack {
-                QRCodeView(value: "inviso://join/\(session.code)")
-                    .navigationTitle("Room QR Code")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showQR = false }
-                        }
-                    }
-            }
-        }
         .navigationDestination(isPresented: $goToChat) {
             ChatView()
         }
@@ -79,17 +76,37 @@ struct PendingSessionView: View {
     
     private var codeShareCard: some View {
         VStack(spacing: 8) {
-            Text("Share this code")
-                .font(.headline)
-                .foregroundColor(.primary)
+            HStack(spacing: 8) {
+                Text("Share this code")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                if let expires = session.expiresAt {
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    CountdownTimerView(expiresAt: expires)
+                }
+            }
             
             codeDigitsView
             
             Button {
                 UIPasteboard.general.string = session.code
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                    showCopied = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        showCopied = false
+                    }
+                }
             } label: {
-                Label("Copy code", systemImage: "doc.on.doc")
-                    .font(.body.weight(.semibold))
+                HStack(spacing: 6) {
+                    Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                        .font(.body.weight(.semibold))
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(showCopied ? "Copied!" : "Copy code")
+                        .font(.body.weight(.semibold))
+                }
             }
             .buttonStyle(.glass)
             
@@ -144,9 +161,18 @@ struct PendingSessionView: View {
     }
 
     private func watchAcceptance() {
-        if let updated = chat.sessions.first(where: { $0.id == session.id }), updated.status == .accepted {
-            // Close this view; user can enter chat from Sessions
-            dismiss()
+        if let updated = chat.sessions.first(where: { $0.id == session.id }) {
+            if updated.status == .accepted {
+                // Auto-close QR modal if open
+                if showQR {
+                    withAnimation(.spring()) { showQR = false }
+                }
+                // Close this view; user can enter chat from Sessions
+                dismiss()
+            } else if updated.status == .expired {
+                // Session expired, return to sessions list
+                dismiss()
+            }
         }
     }
 }
