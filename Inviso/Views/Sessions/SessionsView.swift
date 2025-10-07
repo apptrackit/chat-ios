@@ -2,6 +2,22 @@ import SwiftUI
 import UIKit
 import Combine
 
+enum ContactsSortMode: String {
+    case lastActivity = "Last Activity"
+    case created = "Created"
+    
+    var icon: String {
+        switch self {
+        case .lastActivity: return "clock.arrow.circlepath"
+        case .created: return "calendar"
+        }
+    }
+    
+    mutating func toggle() {
+        self = self == .lastActivity ? .created : .lastActivity
+    }
+}
+
 struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
     @Environment(\.scenePhase) private var scenePhase
@@ -14,6 +30,7 @@ struct SessionsView: View {
     @State private var showQRForSession: ChatSession? = nil
     @State private var showAboutForSession: ChatSession? = nil
     @State private var showClearAllConfirmation = false
+    @State private var contactsSortMode: ContactsSortMode = .lastActivity
 
     var body: some View {
         content
@@ -58,17 +75,44 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    // Contacts (sorted by lastActivityDate)
+                    // Contacts (sorted dynamically)
                     if !activeSessions.isEmpty {
                         Section {
                             ForEach(activeSessions, id: \.id) { session in
                                 sessionRow(session)
                             }
                         } header: {
-                            Text("Contacts")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.primary)
-                                .textCase(nil)
+                            HStack {
+                                Text("Contacts")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                    .textCase(nil)
+                                
+                                Spacer()
+                                
+                                Button {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        contactsSortMode.toggle()
+                                    }
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: contactsSortMode.icon)
+                                            .font(.caption)
+                                        Text(contactsSortMode.rawValue)
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .foregroundColor(.accentColor)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .transition(.scale.combined(with: .opacity))
+                            }
+                            .padding(.trailing, 4)
                         }
                     }
                     
@@ -139,9 +183,13 @@ struct SessionsView: View {
     // MARK: - Session Categorization
     
     private var activeSessions: [ChatSession] {
-        chat.sessions
-            .filter { $0.status == .pending || $0.status == .accepted }
-            .sorted { $0.lastActivityDate > $1.lastActivityDate }
+        let filtered = chat.sessions.filter { $0.status == .pending || $0.status == .accepted }
+        switch contactsSortMode {
+        case .lastActivity:
+            return filtered.sorted { $0.lastActivityDate > $1.lastActivityDate }
+        case .created:
+            return filtered.sorted { $0.createdAt > $1.createdAt }
+        }
     }
     
     private var inactiveSessions: [ChatSession] {
