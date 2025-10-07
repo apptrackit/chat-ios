@@ -6,9 +6,13 @@
 //
 
 import SwiftUI
+import Combine
 
 struct SessionAboutView: View {
     let session: ChatSession
+    
+    @State private var timeRemaining: TimeInterval = 0
+    @State private var timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ScrollView {
@@ -26,53 +30,18 @@ struct SessionAboutView: View {
                 }
                 .padding(.top, 20)
                 
-                // Information Cards
+                // Information Cards - Status Specific
                 VStack(spacing: 16) {
-                    infoCard(title: "Join Code", value: session.code, systemImage: "number")
-                    
-                    if let roomId = session.roomId {
-                        infoCard(title: "Room ID", value: roomId, systemImage: "key", monospaced: true)
+                    switch session.status {
+                    case .accepted:
+                        activeSessionInfo
+                    case .pending:
+                        pendingSessionInfo
+                    case .expired:
+                        expiredSessionInfo
+                    case .closed:
+                        closedSessionInfo
                     }
-                    
-                    infoCard(title: "Created", value: formatDate(session.createdAt), systemImage: "calendar")
-                    
-                    if let expires = session.expiresAt {
-                        infoCard(
-                            title: "Expires",
-                            value: formatDate(expires),
-                            systemImage: "clock",
-                            valueColor: timeRemainingColor(expires)
-                        )
-                        
-                        let remaining = CountdownFormatter.timeRemaining(until: expires)
-                        if remaining > 0 {
-                            infoCard(
-                                title: "Time Remaining",
-                                value: CountdownFormatter.format(timeRemaining: remaining),
-                                systemImage: "hourglass",
-                                valueColor: timeRemainingColor(expires)
-                            )
-                        }
-                    }
-                    
-                    infoCard(
-                        title: "Last Activity",
-                        value: formatRelativeDate(session.lastActivityDate),
-                        systemImage: "clock.arrow.circlepath"
-                    )
-                    
-                    infoCard(
-                        title: "Role",
-                        value: session.isCreatedByMe ? "Creator" : "Joiner",
-                        systemImage: session.isCreatedByMe ? "person.badge.plus" : "person.badge.key"
-                    )
-                    
-                    infoCard(
-                        title: "Device ID",
-                        value: String(session.ephemeralDeviceId.prefix(12)) + "...",
-                        systemImage: "iphone",
-                        monospaced: true
-                    )
                 }
                 .padding(.horizontal)
                 
@@ -82,6 +51,145 @@ struct SessionAboutView: View {
         .navigationTitle("About")
         .navigationBarTitleDisplayMode(.inline)
         .background(Color(UIColor.systemGroupedBackground))
+        .onAppear { updateTimeRemaining() }
+        .onReceive(timer) { _ in updateTimeRemaining() }
+    }
+    
+    // MARK: - Status-Specific Views
+    
+    @ViewBuilder
+    private var activeSessionInfo: some View {
+        infoCard(title: "Join Code", value: "\(session.code) (Used)", systemImage: "checkmark.circle")
+        
+        if let roomId = session.roomId {
+            infoCard(title: "Room ID", value: roomId, systemImage: "key", monospaced: true)
+        }
+        
+        infoCard(title: "Created", value: formatDate(session.createdAt), systemImage: "calendar")
+        
+        if let firstConnected = session.firstConnectedAt {
+            infoCard(title: "First Connected", value: formatDate(firstConnected), systemImage: "link")
+        }
+        
+        infoCard(
+            title: "Last Activity",
+            value: formatRelativeDate(session.lastActivityDate),
+            systemImage: "clock.arrow.circlepath"
+        )
+        
+        infoCard(
+            title: "Role",
+            value: session.isCreatedByMe ? "Creator" : "Joiner",
+            systemImage: session.isCreatedByMe ? "person.badge.plus" : "person.badge.key"
+        )
+        
+        infoCard(
+            title: "Device ID",
+            value: String(session.ephemeralDeviceId.prefix(12)) + "...",
+            systemImage: "iphone",
+            monospaced: true
+        )
+    }
+    
+    @ViewBuilder
+    private var pendingSessionInfo: some View {
+        infoCard(title: "Join Code", value: session.code, systemImage: "number")
+        
+        infoCard(title: "Created", value: formatDate(session.createdAt), systemImage: "calendar")
+        
+        if let expires = session.expiresAt {
+            infoCard(
+                title: "Expires",
+                value: formatDate(expires),
+                systemImage: "clock",
+                valueColor: timeRemainingColor(expires)
+            )
+            
+            if timeRemaining > 0 {
+                infoCard(
+                    title: "Time Remaining",
+                    value: CountdownFormatter.format(timeRemaining: timeRemaining),
+                    systemImage: "hourglass",
+                    valueColor: timeRemainingColor(expires)
+                )
+            }
+        }
+        
+        infoCard(
+            title: "Role",
+            value: session.isCreatedByMe ? "Creator" : "Joiner",
+            systemImage: session.isCreatedByMe ? "person.badge.plus" : "person.badge.key"
+        )
+        
+        infoCard(
+            title: "Device ID",
+            value: String(session.ephemeralDeviceId.prefix(12)) + "...",
+            systemImage: "iphone",
+            monospaced: true
+        )
+    }
+    
+    @ViewBuilder
+    private var expiredSessionInfo: some View {
+        infoCard(title: "Join Code", value: session.code, systemImage: "number")
+        
+        infoCard(title: "Created", value: formatDate(session.createdAt), systemImage: "calendar")
+        
+        if let expires = session.expiresAt {
+            infoCard(
+                title: "Expired",
+                value: formatDate(expires),
+                systemImage: "clock.badge.xmark",
+                valueColor: .red
+            )
+        }
+        
+        infoCard(
+            title: "Role",
+            value: session.isCreatedByMe ? "Creator" : "Joiner",
+            systemImage: session.isCreatedByMe ? "person.badge.plus" : "person.badge.key"
+        )
+        
+        infoCard(
+            title: "Device ID",
+            value: String(session.ephemeralDeviceId.prefix(12)) + "...",
+            systemImage: "iphone",
+            monospaced: true
+        )
+    }
+    
+    @ViewBuilder
+    private var closedSessionInfo: some View {
+        infoCard(title: "Join Code", value: "\(session.code) (Used)", systemImage: "checkmark.circle")
+        
+        infoCard(title: "Created", value: formatDate(session.createdAt), systemImage: "calendar")
+        
+        if let closedDate = session.closedAt {
+            infoCard(
+                title: "Closed",
+                value: formatDate(closedDate),
+                systemImage: "xmark.circle"
+            )
+        }
+        
+        infoCard(
+            title: "Last Activity",
+            value: formatRelativeDate(session.lastActivityDate),
+            systemImage: "clock.arrow.circlepath"
+        )
+        
+        infoCard(
+            title: "Role",
+            value: session.isCreatedByMe ? "Creator" : "Joiner",
+            systemImage: session.isCreatedByMe ? "person.badge.plus" : "person.badge.key"
+        )
+        
+        infoCard(
+            title: "Device ID",
+            value: String(session.ephemeralDeviceId.prefix(12)) + "...",
+            systemImage: "iphone",
+            monospaced: true
+        )
     }
     
     // MARK: - Subviews
@@ -173,6 +281,10 @@ struct SessionAboutView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+    
+    private func updateTimeRemaining() {
+        timeRemaining = CountdownFormatter.timeRemaining(until: session.expiresAt)
     }
     
     private func timeRemainingColor(_ expiryDate: Date) -> Color {

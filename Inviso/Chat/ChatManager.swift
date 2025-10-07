@@ -264,12 +264,21 @@ class ChatManager: NSObject, ObservableObject {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         if sessions[idx].status != .accepted {
             sessions[idx].status = .accepted
+            // Set first connected timestamp if not already set
+            if sessions[idx].firstConnectedAt == nil {
+                sessions[idx].firstConnectedAt = Date()
+            }
+            persistSessions()
         }
     }
 
     func closeActiveSession() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].status = .closed
+        // Set closed timestamp
+        if sessions[idx].closedAt == nil {
+            sessions[idx].closedAt = Date()
+        }
         activeSessionId = nil
     // If room exists, call backend delete
     if let rid = sessions[idx].roomId { Task { await deleteRoomOnServer(roomId: rid) } }
@@ -415,6 +424,10 @@ class ChatManager: NSObject, ObservableObject {
                     case .accepted(let roomId):
                         sessions[i].status = .accepted
                         sessions[i].roomId = roomId
+                        // Set first connected timestamp if not already set
+                        if sessions[i].firstConnectedAt == nil {
+                            sessions[i].firstConnectedAt = Date()
+                        }
                         persistSessions()
                     case .expired:
                         sessions[i].status = .expired
@@ -434,6 +447,10 @@ class ChatManager: NSObject, ObservableObject {
                     case .notFound:
                         sessions[i].status = .closed
                         sessions[i].roomId = nil
+                        // Set closed timestamp if not already set
+                        if sessions[i].closedAt == nil {
+                            sessions[i].closedAt = Date()
+                        }
                         persistSessions()
                     case .unreachable:
                         // Do nothing; keep current state. We'll re-validate when back online.

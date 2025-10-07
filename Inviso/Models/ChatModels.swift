@@ -38,11 +38,13 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var createdAt: Date
     var expiresAt: Date?
     var lastActivityDate: Date // Tracks last interaction (create, join, message) for sorting
+    var firstConnectedAt: Date? // Estimated first connection time (when status became .accepted)
+    var closedAt: Date? // Estimated close time (when status became .closed)
     var status: SessionStatus
     var isCreatedByMe: Bool
     var ephemeralDeviceId: String // Unique per-session identifier for privacy
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString) {
         self.id = id
         self.name = name
         self.code = code
@@ -50,6 +52,8 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.createdAt = createdAt
         self.expiresAt = expiresAt
         self.lastActivityDate = lastActivityDate
+        self.firstConnectedAt = firstConnectedAt
+        self.closedAt = closedAt
         self.status = status
         self.isCreatedByMe = isCreatedByMe
         self.ephemeralDeviceId = ephemeralDeviceId
@@ -57,7 +61,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, status, isCreatedByMe, ephemeralDeviceId
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId
     }
     
     init(from decoder: Decoder) throws {
@@ -70,6 +74,8 @@ struct ChatSession: Identifiable, Equatable, Codable {
         expiresAt = try container.decodeIfPresent(Date.self, forKey: .expiresAt)
         // Fallback to createdAt if lastActivityDate is missing (backward compatibility)
         lastActivityDate = try container.decodeIfPresent(Date.self, forKey: .lastActivityDate) ?? container.decode(Date.self, forKey: .createdAt)
+        firstConnectedAt = try container.decodeIfPresent(Date.self, forKey: .firstConnectedAt)
+        closedAt = try container.decodeIfPresent(Date.self, forKey: .closedAt)
         status = try container.decode(SessionStatus.self, forKey: .status)
         isCreatedByMe = try container.decode(Bool.self, forKey: .isCreatedByMe)
         ephemeralDeviceId = try container.decode(String.self, forKey: .ephemeralDeviceId)
