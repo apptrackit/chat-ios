@@ -36,6 +36,9 @@ class ChatManager: NSObject, ObservableObject {
     private var hadP2POnce = false
     // Deep link join waiting confirmation
     @Published var pendingDeepLinkCode: String? = nil
+    // ChatView lifecycle tracking to defer P2P connection
+    private(set) var isChatViewActive = false
+    private var pendingRoomReadyIsInitiator: Bool?
 
     override init() {
     self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
@@ -65,6 +68,8 @@ class ChatManager: NSObject, ObservableObject {
         clientId = nil
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
+        isChatViewActive = false
+        pendingRoomReadyIsInitiator = nil
     }
 
     // Change server host at runtime. Disconnects current signaling and rebuilds client.
@@ -103,6 +108,8 @@ class ChatManager: NSObject, ObservableObject {
         pcm.close()
         isP2PConnected = false
     remotePeerPresent = false
+        // Clear any pending room_ready that wasn't processed
+        pendingRoomReadyIsInitiator = nil
         // Send leave to server and clear local room immediately.
         isAwaitingLeaveAck = true
         signaling.send(["type": "leave_room"])        
@@ -129,6 +136,26 @@ class ChatManager: NSObject, ObservableObject {
             if let sessionId = activeSessionId {
                 updateSessionActivity(sessionId)
             }
+        }
+    }
+
+    // MARK: - ChatView Lifecycle Management
+    /// Called when ChatView appears. If we have a pending room_ready, process it now.
+    func chatViewDidAppear() {
+        isChatViewActive = true
+        if let isInitiator = pendingRoomReadyIsInitiator {
+            pendingRoomReadyIsInitiator = nil
+            handleRoomReady(isInitiator: isInitiator)
+        }
+    }
+
+    /// Called when ChatView disappears. Clears the active flag.
+    func chatViewDidDisappear() {
+        isChatViewActive = false
+        // If user left before P2P was established, clear pending room_ready
+        // This prevents auto-connecting when they return later
+        if pendingRoomReadyIsInitiator != nil && !isP2PConnected {
+            pendingRoomReadyIsInitiator = nil
         }
     }
 
@@ -480,6 +507,20 @@ class ChatManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - P2P Connection Handling
+    /// Establishes the WebRTC peer connection when room is ready
+    private func handleRoomReady(isInitiator: Bool) {
+        pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
+        if isInitiator {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self.pcm.createOffer { sdp in
+                    guard let sdp = sdp else { return }
+                    self.signaling.send(["type": "webrtc_offer", "sdp": sdp.sdp])
+                }
+            }
+        }
+    }
+
     // Internal
     private func handleServerMessage(_ json: [String: Any]) {
         guard let type = json["type"] as? String else { return }
@@ -490,16 +531,16 @@ class ChatManager: NSObject, ObservableObject {
             hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
-            pcm.createPeerConnection(isInitiator: isInitiator, customHost: ServerConfig.shared.host)
-            if isInitiator {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.pcm.createOffer { sdp in
-                        guard let sdp = sdp else { return }
-                        self.signaling.send(["type": "webrtc_offer", "sdp": sdp.sdp])
-                    }
-                }
+            // Only establish P2P connection if ChatView is active
+            if isChatViewActive {
+                handleRoomReady(isInitiator: isInitiator)
+            } else {
+                // Queue for later processing when ChatView appears
+                pendingRoomReadyIsInitiator = isInitiator
             }
         case "webrtc_offer":
+            // Only process WebRTC offer if ChatView is active
+            guard isChatViewActive else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let offer = RTCSessionDescription(type: .offer, sdp: sdp)
             if self.pcm.pc == nil { self.pcm.createPeerConnection(isInitiator: false, customHost: ServerConfig.shared.host) }
@@ -508,10 +549,14 @@ class ChatManager: NSObject, ObservableObject {
                 self.signaling.send(["type": "webrtc_answer", "sdp": answer.sdp])
             }
         case "webrtc_answer":
+            // Only process if we have a peer connection (means we're the initiator who sent offer)
+            guard pcm.pc != nil else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let answer = RTCSessionDescription(type: .answer, sdp: sdp)
             self.pcm.setRemoteAnswer(answer) { _ in }
         case "ice_candidate":
+            // Only process ICE candidates if we have a peer connection
+            guard pcm.pc != nil else { return }
             guard let c = json["candidate"] as? [String: Any],
                   let sdp = c["candidate"] as? String,
                   let idx = c["sdpMLineIndex"] as? Int32,

@@ -42,6 +42,12 @@ struct ChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
         .navigationBarBackButtonHidden(true)
+        .onAppear {
+            chat.chatViewDidAppear()
+        }
+        .onDisappear {
+            chat.chatViewDidDisappear()
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { showLeaveConfirm = true } label: {
