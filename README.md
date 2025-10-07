@@ -24,11 +24,15 @@ Messages never transit the REST API after the P2P connection is established; onl
 ## 2. Core Features
 * Join‑code based session creation + acceptance workflow (pending → accepted → closed)
 * WebRTC DataChannel (ordered, reliable) for text messages
+* **Ephemeral device IDs per session** (no persistent device tracking)
+* **Automatic server purge** when sessions are deleted
+* Biometric authentication (Face ID / Touch ID) + passphrase protection
 * Automatic ICE gathering + TURN fallback
 * Heartbeat & reconnection strategy for signaling
 * Session persistence in `UserDefaults` (frontend only; no message storage server‑side)
 * Privacy overlay to hide content when app resigns active
 * Graceful leave + reconnection suppression to avoid thrash
+* Session name synchronization across UI components
 * Lightweight modular code (single responsibility objects)
 
 ## 3. High‑Level Architecture
@@ -51,11 +55,32 @@ SwiftUI Views (ChatView, SessionsView, etc.)
 | `ChatManager` | Orchestrates session lifecycle, REST calls, signaling messages, P2P state, UI‑facing published state. |
 | `SignalingClient` | Manages WebSocket connection, heartbeat ping, reconnect logic, JSON encode/decode. |
 | `PeerConnectionManager` | Creates & manages `RTCPeerConnection` and `RTCDataChannel`, offers/answers, ICE candidates. |
+| `DeviceIDManager` | Manages ephemeral device IDs per session, handles server purge requests on deletion. |
 | `AppSecurityManager` | Observes app lifecycle and toggles privacy overlay. |
+| `AuthenticationSettingsStore` | Manages biometric and passphrase authentication settings. |
+| `PassphraseManager` | Secure passphrase storage and validation using Keychain. |
 | SwiftUI Views | Render real‑time state and dispatch user intents (create session, send message, leave room). |
 
 ## 4. Session & Connection Lifecycle
-1. User creates a session → `ChatSession(status: .pending)` stored locally and POST `/api/rooms` with join code + expiry.
+
+### Expiry System
+**Server-Side Calculation:** The app sends duration in seconds (`expiresInSeconds`) instead of calculating expiry dates locally. The server calculates the exact expiry timestamp based on its own clock, eliminating clock skew issues between devices.
+
+**Duration Values:**
+- 1 minute = `60` seconds
+- 5 minutes = `300` seconds
+- 1 hour = `3600` seconds
+- 12 hours = `43200` seconds
+- 24 hours = `86400` seconds
+
+**Benefits:**
+- ✅ No clock skew between devices
+- ✅ Server is source of truth for expiry
+- ✅ Automatic cleanup at database level
+- ✅ Expired sessions cannot be joined
+
+### Connection Flow
+1. User creates a session → `ChatSession(status: .pending)` stored locally and POST `/api/rooms` with join code + `expiresInSeconds`.
 2. Remote peer enters the join code → backend pairs clients → returns `roomid` to second peer; first peer polls (`checkPendingOnServer`) until accepted.
 3. When both sides have the `roomId`, the UI triggers `joinRoom(roomId:)` → signaling server orchestrates who is initiator.
 4. Initiator creates `RTCPeerConnection` + DataChannel → creates SDP offer → sent over WebSocket.
@@ -90,13 +115,26 @@ No message content traverses the signaling server after P2P establishment (only 
 | Session polling | `pollPendingAndValidateRooms()` validates pending acceptance + still‑existing rooms |
 
 ## 7. Security & Privacy Notes
-| Area | Current Approach | Consider Hardening |
-|------|------------------|--------------------|
-| Transport | WebRTC DTLS + TURN relays (credentials in code) | Dynamic TURN creds (e.g., time‑limited tokens) |
-| Message storage | In‑memory only (optionally ephemeral) | Add E2E application‑level encryption (Double Ratchet) |
-| Background privacy | Fullscreen black overlay (`PrivacyOverlayView`) | Add biometric re‑unlock gate |
-| Device identity | UUID persisted (`DeviceIDManager.shared`) | Rotate / ephemeral IDs per session |
-| Error handling | Console prints | Structured logging + redaction |
+| Area | Current Approach | Notes |
+|------|------------------|-------|
+| Transport | WebRTC DTLS + TURN relays | Dynamic TURN creds recommended for production |
+| Message storage | In‑memory only (optionally ephemeral) | No message history stored server-side |
+| Background privacy | Fullscreen black overlay (`PrivacyOverlayView`) | Biometric re-unlock available via settings |
+| Device identity | **Ephemeral IDs per session** | Each session gets unique UUID, cannot be correlated |
+| Server cleanup | Automatic purge on deletion | Ephemeral IDs purged from server when sessions deleted |
+| Authentication | Optional biometric + passphrase | Face ID / Touch ID + custom passphrase support |
+| Error handling | Console prints with `[Component]` tags | Structured logging for debugging |
+
+### Ephemeral Identity System
+**Privacy-First Design:** No persistent device ID is stored or transmitted. Each chat session generates a unique ephemeral ID that:
+- Cannot be linked back to the device
+- Is automatically purged from the server when the session is deleted
+- Is cleared during "Erase All Data" operation
+- Enables complete session unlinkability
+
+**Server Purge API:** When ephemeral IDs are deleted locally, they are automatically purged from the backend via batch API (`POST /api/user/purge` with `{"deviceIds": [...]}`).
+
+**Session Name Sync:** When you rename a session, the name is synchronized to the ephemeral ID record, ensuring Settings → Privacy → Session Identities always shows current names.
 
 TURN credentials in the source are for development/testing only—rotate and secure in production.
 
@@ -109,10 +147,14 @@ Inviso/
   ChatManager.swift          # Orchestration & state
   Models/ChatModels.swift    # Connection + session models
   Signaling/SignalingClient.swift
-  WebRTC/PeerConnectionManager.swift
+  Networking/PeerConnectionManager.swift
   Security/                  # Privacy overlay & lifecycle security
+  Services/
+    Authentication/          # Biometric + passphrase auth
+    Storage/                 # DeviceIDManager, AppDataReset
   Views/                     # SwiftUI interface (ChatView, SessionsView, etc.)
-  Utilities/                 # Helpers (AppDataReset, etc.)
+    Settings/                # Settings UI including EphemeralIDsView
+  Utilities/                 # Helpers & security notifications
 ```
 
 ## 10. Build & Run
@@ -127,13 +169,62 @@ Prerequisites: Xcode 15+, iOS 15+ target.
 Add this repo as a remote Swift Package and depend on target `Inviso`. Instantiate `ChatManager()` and inject into your SwiftUI environment.
 
 ## 11. Configuration
-Edit inside `ChatManager`:
+
+### Server Configuration
+The app dynamically configures server endpoints via `ServerConfig.shared.host`:
 ```swift
-// Now dynamically configured via ServerConfig.shared.host
-// Example: let signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
-//          let apiBase = URL(string: "http://\(ServerConfig.shared.host)")!
+// Signaling WebSocket
+let signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
+
+// REST API
+let apiBase = URL(string: "https://\(ServerConfig.shared.host)")!
 ```
-Change ICE servers in `PeerConnectionManager.createPeerConnection`.
+
+Change server host at runtime via Settings → Server Configuration.
+
+### REST API Integration
+The app communicates with the backend REST API for session coordination:
+
+**Create Pending Session (Client1):**
+```swift
+// POST /api/rooms
+{
+  "joinid": "123456",
+  "expiresInSeconds": 300,  // Duration in seconds
+  "client1": "ephemeral-device-id"
+}
+```
+
+**Accept Session (Client2):**
+```swift
+// POST /api/rooms/accept
+{
+  "joinid": "123456",
+  "client2": "ephemeral-device-id"
+}
+// Returns: { "roomid": "abc123..." }
+```
+
+**Check Status (Client1 polling):**
+```swift
+// POST /api/rooms/check
+{
+  "joinid": "123456",
+  "client1": "ephemeral-device-id"
+}
+// Returns: 204 (pending) or 200 { "roomid": "..." } (accepted)
+```
+
+### ICE Server Configuration
+Change STUN/TURN servers in `PeerConnectionManager.createPeerConnection`:
+```swift
+let iceServers = [
+    RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"]),
+    RTCIceServer(urlStrings: ["turn:your-turn-server:3478"], 
+                 username: "user", 
+                 credential: "pass")
+]
+```
 
 Environment‑driven config can be introduced by wrapping these in a struct injected at init.
 
@@ -142,10 +233,12 @@ Environment‑driven config can be introduced by wrapping these in a struct inje
 * File or image transfer (DataChannel chunking + metadata messages).
 * Application‑level E2E encryption (Olm/DoubleRatchet libs) over DataChannel payload.
 * Push notifications for pending session acceptance (APNs + backend trigger).
-* Analytics & telemetry (with privacy controls).
+* Analytics & telemetry (with privacy controls and user consent).
 * Offline queue (buffer sends until P2P established).
 * Theming + accessibility improvements (Dynamic Type, VoiceOver labels for system messages).
 * On‑device LLM assistant (iOS 26+) — local inference chat tab (prototype added).
+* Message expiration timer beyond 24h default.
+* Export/import session configuration (without message history).
 
 ## 13. Troubleshooting
 | Symptom | Possible Cause | Action |
@@ -198,7 +291,12 @@ This is a development / demonstration project. Do not ship to production without
 | Join room | `ChatManager.joinRoom` |
 | Send message | `ChatManager.sendMessage` |
 | Leave room | `ChatManager.leave` |
+| Rename session | `ChatManager.renameSession` |
+| Delete session | `ChatManager.removeSession` |
 | P2P event | `PeerConnectionManagerDelegate` methods |
+| Ephemeral ID management | `DeviceIDManager.shared` |
+| Server purge | `DeviceIDManager.purgeFromServer` |
+| Authentication settings | `AuthenticationSettingsStore.shared` |
 | On‑device LLM chat | `OnDeviceLLMManager` via `LLMView` |
 
 ---

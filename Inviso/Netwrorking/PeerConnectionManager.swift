@@ -108,7 +108,7 @@ final class PeerConnectionManager: NSObject {
     }
 
     func addRemoteCandidate(_ c: RTCIceCandidate) {
-        if pc?.remoteDescription == nil { pending.append(c) } else { pc?.add(c) }
+        if pc?.remoteDescription == nil { pending.append(c) } else { pc?.add(c, completionHandler: { _ in }) }
     }
 
     func send(_ text: String) -> Bool {
@@ -117,7 +117,7 @@ final class PeerConnectionManager: NSObject {
         return dc.sendData(buf)
     }
 
-    private func flushPending() { guard let pc = pc else { return }; pending.forEach { pc.add($0) }; pending.removeAll() }
+    private func flushPending() { guard let pc = pc else { return }; pending.forEach { pc.add($0, completionHandler: { _ in }) }; pending.removeAll() }
 
     // Expose stats for classifying connection path (direct vs relayed)
     func fetchStats(_ completion: @escaping (RTCStatisticsReport) -> Void) {

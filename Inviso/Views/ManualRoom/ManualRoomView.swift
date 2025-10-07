@@ -33,16 +33,15 @@ struct ManualRoomView: View {
                 .padding(.horizontal)
 
             Spacer()
-
-            // Hidden navigation trigger when P2P is up
-            NavigationLink(destination: ChatView(), isActive: $goToChat) { EmptyView() }
-                .hidden()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(UIColor.systemGroupedBackground))
-    .navigationTitle("Manual Room")
+        .navigationDestination(isPresented: $goToChat) {
+            ChatView()
+        }
+        .navigationTitle("Manual Room")
     .signalingToolbar()
-    .onChange(of: chat.isP2PConnected) { _ in /* ChatView shows state; no nav needed here */ }
+    .onChange(of: chat.isP2PConnected) { /* ChatView shows state; no nav needed here */ }
         .onAppear {
             // Keep status fresh; auto-connect WS in background if needed when typing
             if chat.connectionStatus == .disconnected { chat.connect() }

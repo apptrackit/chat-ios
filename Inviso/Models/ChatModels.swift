@@ -38,8 +38,9 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var expiresAt: Date?
     var status: SessionStatus
     var isCreatedByMe: Bool
+    var ephemeralDeviceId: String // Unique per-session identifier for privacy
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString) {
         self.id = id
         self.name = name
         self.code = code
@@ -48,6 +49,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.expiresAt = expiresAt
         self.status = status
         self.isCreatedByMe = isCreatedByMe
+        self.ephemeralDeviceId = ephemeralDeviceId
     }
 
     var displayName: String {

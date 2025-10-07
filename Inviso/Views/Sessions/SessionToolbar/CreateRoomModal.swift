@@ -167,7 +167,7 @@ struct CreateRoomModal: View {
             .transition(.scale.combined(with: .opacity))
             .onAppear { createNameFocused = true }
         }
-        .onChange(of: chat.sessions) { _ in
+        .onChange(of: chat.sessions) {
             // Auto-close create popups when session becomes accepted (other client joined)
             if isPresented || showCreateResult || showCreatedQRCode {
                 if let activeSession = chat.sessions.first(where: { $0.id == chat.activeSessionId }),

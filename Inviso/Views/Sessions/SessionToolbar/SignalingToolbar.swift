@@ -42,7 +42,7 @@ struct SignalingToolbar: ViewModifier {
             }
         }
         .onDisappear { isExpanded = false }
-        .onChange(of: scenePhase) { _ in isExpanded = false }
+        .onChange(of: scenePhase) { isExpanded = false }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 NavigationLink(destination: SettingsView()) {
