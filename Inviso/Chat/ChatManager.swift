@@ -164,7 +164,7 @@ class ChatManager: NSObject, ObservableObject {
         // Validate 6-digit pattern
         guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return }
         // If already have an accepted or pending session with this code, select it
-        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
             // If already accepted and have roomId, join room automatically
             if let rid = existing.roomId { joinRoom(roomId: rid) }
@@ -205,7 +205,7 @@ class ChatManager: NSObject, ObservableObject {
         guard code.range(of: "^[0-9]{6}$", options: .regularExpression) != nil else { return false }
         
         // If already have an accepted or pending session with this code, select it
-        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed }) {
+        if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
             // If already accepted and have roomId, join room automatically
             if let rid = existing.roomId { joinRoom(roomId: rid) }
@@ -333,7 +333,14 @@ class ChatManager: NSObject, ObservableObject {
         return nil
     }
 
-    func checkPendingOnServer(session: ChatSession) async -> String? {
+    enum PendingCheckResult {
+        case accepted(roomId: String)
+        case stillPending
+        case expired
+        case error
+    }
+
+    func checkPendingOnServer(session: ChatSession) async -> PendingCheckResult {
         let client1 = session.ephemeralDeviceId
         var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/check"))
         req.httpMethod = "POST"
@@ -341,12 +348,17 @@ class ChatManager: NSObject, ObservableObject {
         req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": session.code, "client1": client1])
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return nil }
-            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { return rid }
-            if http.statusCode == 204 { return nil }
-            if http.statusCode == 404 { return nil }
+            guard let http = resp as? HTTPURLResponse else { return .error }
+            if http.statusCode == 200 {
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String {
+                    return .accepted(roomId: rid)
+                }
+                return .error
+            }
+            if http.statusCode == 204 { return .stillPending }
+            if http.statusCode == 404 { return .expired }
         } catch { print("checkPending error: \(error)") }
-        return nil
+        return .error
     }
 
     func getRoom(roomId: String) async -> (client1: String, client2: String)? {
@@ -378,10 +390,17 @@ class ChatManager: NSObject, ObservableObject {
             for i in sessions.indices {
                 let s = sessions[i]
                 if s.status == .pending {
-                    if let rid = await checkPendingOnServer(session: s) {
+                    let result = await checkPendingOnServer(session: s)
+                    switch result {
+                    case .accepted(let roomId):
                         sessions[i].status = .accepted
-                        sessions[i].roomId = rid
+                        sessions[i].roomId = roomId
                         persistSessions()
+                    case .expired:
+                        sessions[i].status = .expired
+                        persistSessions()
+                    case .stillPending, .error:
+                        break // Keep current state
                     }
                 }
             }
@@ -403,7 +422,7 @@ class ChatManager: NSObject, ObservableObject {
                 }
             }
             // 3) Prune ephemeral IDs for closed/removed sessions
-            let activeEphemeralIDs = Set(sessions.filter { $0.status != .closed }.map { $0.ephemeralDeviceId })
+            let activeEphemeralIDs = Set(sessions.filter { $0.status != .closed && $0.status != .expired }.map { $0.ephemeralDeviceId })
             DeviceIDManager.shared.pruneEphemeralIDs(activeSessionIDs: activeEphemeralIDs)
         }
     }

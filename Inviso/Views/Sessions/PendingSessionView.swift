@@ -144,9 +144,14 @@ struct PendingSessionView: View {
     }
 
     private func watchAcceptance() {
-        if let updated = chat.sessions.first(where: { $0.id == session.id }), updated.status == .accepted {
-            // Close this view; user can enter chat from Sessions
-            dismiss()
+        if let updated = chat.sessions.first(where: { $0.id == session.id }) {
+            if updated.status == .accepted {
+                // Close this view; user can enter chat from Sessions
+                dismiss()
+            } else if updated.status == .expired {
+                // Session expired, return to sessions list
+                dismiss()
+            }
         }
     }
 }

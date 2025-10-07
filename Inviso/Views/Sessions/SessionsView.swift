@@ -60,6 +60,8 @@ struct SessionsView: View {
                         Button {
                             // Block interactions that cause network join when offline
                             guard chat.connectionStatus == .connected else { return }
+                            // Block interaction for expired sessions
+                            guard session.status != .expired else { return }
                             chat.selectSession(session)
                             if session.status == .pending {
                                 goToPending = true
@@ -139,6 +141,7 @@ struct SessionsView: View {
             case .pending: return .yellow
             case .accepted: return .green
             case .closed: return .gray
+            case .expired: return .orange
             }
         }()
         return Circle().fill(color).frame(width: 10, height: 10)
@@ -152,6 +155,8 @@ struct SessionsView: View {
             return "Active"
         case .closed:
             return "Closed"
+        case .expired:
+            return "Expired • Code \(s.code)"
         }
     }
 

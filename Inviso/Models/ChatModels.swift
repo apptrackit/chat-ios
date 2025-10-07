@@ -27,6 +27,7 @@ enum SessionStatus: String, Codable, Equatable {
     case pending
     case accepted
     case closed
+    case expired
 }
 
 struct ChatSession: Identifiable, Equatable, Codable {
