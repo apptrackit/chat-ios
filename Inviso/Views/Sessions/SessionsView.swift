@@ -144,18 +144,22 @@ struct SessionsView: View {
                                             sortDirection.toggle()
                                         }
                                     } label: {
-                                        Image(systemName: sortDirection.icon)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundColor(.accentColor)
-                                            .frame(width: 24, height: 24)
-                                            .background(
-                                                Circle()
-                                                    .fill(Color.accentColor.opacity(0.12))
-                                            )
+                                        HStack(spacing: 4) {
+                                            Text(sortDirection.label)
+                                                .font(.caption.weight(.medium))
+                                            Image(systemName: sortDirection.icon)
+                                                .font(.caption2.weight(.bold))
+                                        }
+                                        .foregroundColor(.accentColor)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            Capsule()
+                                                .fill(Color.accentColor.opacity(0.12))
+                                        )
                                     }
                                     .buttonStyle(.plain)
-                                    .rotationEffect(.degrees(sortDirection == .descending ? 0 : 180))
-                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: sortDirection)
+                                    .transition(.scale.combined(with: .opacity))
                                 }
                             }
                             .padding(.trailing, 4)
