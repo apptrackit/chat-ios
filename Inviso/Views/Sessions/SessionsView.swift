@@ -75,9 +75,7 @@ struct SessionsView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(session.displayName)
                                         .font(.body.weight(.semibold))
-                                    Text(subtitle(for: session))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
+                                    subtitleView(for: session)
                                 }
                                 Spacer()
                                 if session.status == .pending {
@@ -147,7 +145,23 @@ struct SessionsView: View {
         return Circle().fill(color).frame(width: 10, height: 10)
     }
 
-    private func subtitle(for s: ChatSession) -> String {
+    @ViewBuilder
+    private func subtitleView(for s: ChatSession) -> some View {
+        HStack(spacing: 4) {
+            Text(subtitleText(for: s))
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            if s.status == .pending, let expires = s.expiresAt {
+                Text("•")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                CountdownTimerView(expiresAt: expires)
+            }
+        }
+    }
+    
+    private func subtitleText(for s: ChatSession) -> String {
         switch s.status {
         case .pending:
             return "Waiting • Code \(s.code)"

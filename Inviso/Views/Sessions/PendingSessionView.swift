@@ -79,9 +79,16 @@ struct PendingSessionView: View {
     
     private var codeShareCard: some View {
         VStack(spacing: 8) {
-            Text("Share this code")
-                .font(.headline)
-                .foregroundColor(.primary)
+            HStack(spacing: 8) {
+                Text("Share this code")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                if let expires = session.expiresAt {
+                    Text("•")
+                        .foregroundColor(.secondary)
+                    CountdownTimerView(expiresAt: expires)
+                }
+            }
             
             codeDigitsView
             
