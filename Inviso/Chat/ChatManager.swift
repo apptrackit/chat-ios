@@ -6,9 +6,11 @@
 //
 
 import Foundation
+import SwiftUI
 import WebRTC
 import Combine
 import CryptoKit
+import UIKit
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
@@ -58,6 +60,10 @@ class ChatManager: NSObject, ObservableObject {
     
     // Server-assigned WebRTC initiator role (first user to join = initiator)
     private var serverAssignedIsInitiator: Bool? = nil
+    
+    // Track disconnection state for automatic rejoin
+    private var wasInRoomBeforeDisconnect: String? = nil
+    private var appLifecycleCancellables = Set<AnyCancellable>()
 
     override init() {
     self.signaling = SignalingClient(serverURL: "wss://\(ServerConfig.shared.host)")
@@ -66,6 +72,7 @@ class ChatManager: NSObject, ObservableObject {
         pcm.delegate = self
         loadSessions()
         setupKeyExchangeObservers()
+        setupAppLifecycleObservers()
     }
 
     deinit {
@@ -126,13 +133,18 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     func leave(userInitiated: Bool = false) {
-        if userInitiated { suppressReconnectOnce = true }
+        if userInitiated { 
+            suppressReconnectOnce = true
+            // User explicitly left - clear auto-rejoin state
+            wasInRoomBeforeDisconnect = nil
+        }
         guard !roomId.isEmpty else { return }
     messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
     remotePeerPresent = false
+        hadP2POnce = false
         
         // Clean up encryption for this session
         cleanupEncryption()
@@ -365,7 +377,9 @@ class ChatManager: NSObject, ObservableObject {
     func markActiveSessionAccepted() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         if sessions[idx].status != .accepted {
-            sessions[idx].status = .accepted
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                sessions[idx].status = .accepted
+            }
             // Set first connected timestamp if not already set
             if sessions[idx].firstConnectedAt == nil {
                 sessions[idx].firstConnectedAt = Date()
@@ -376,7 +390,9 @@ class ChatManager: NSObject, ObservableObject {
 
     func closeActiveSession() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        sessions[idx].status = .closed
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+            sessions[idx].status = .closed
+        }
         // Set closed timestamp
         if sessions[idx].closedAt == nil {
             sessions[idx].closedAt = Date()
@@ -524,7 +540,9 @@ class ChatManager: NSObject, ObservableObject {
                     let result = await checkPendingOnServer(session: s)
                     switch result {
                     case .accepted(let roomId):
-                        sessions[i].status = .accepted
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .accepted
+                        }
                         sessions[i].roomId = roomId
                         // Set first connected timestamp if not already set
                         if sessions[i].firstConnectedAt == nil {
@@ -532,7 +550,9 @@ class ChatManager: NSObject, ObservableObject {
                         }
                         persistSessions()
                     case .expired:
-                        sessions[i].status = .expired
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .expired
+                        }
                         persistSessions()
                     case .stillPending, .error:
                         break // Keep current state
@@ -547,7 +567,9 @@ class ChatManager: NSObject, ObservableObject {
                     case .exists:
                         break // all good
                     case .notFound:
-                        sessions[i].status = .closed
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .closed
+                        }
                         sessions[i].roomId = nil
                         // Set closed timestamp if not already set
                         if sessions[i].closedAt == nil {
@@ -605,6 +627,126 @@ class ChatManager: NSObject, ObservableObject {
             name: .keyExchangeCompleteReceived,
             object: nil
         )
+    }
+    
+    private func setupAppLifecycleObservers() {
+        // Observe when app becomes active (returns from background)
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    await self?.handleAppBecameActive()
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+        
+        // Observe when app enters foreground
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    await self?.handleAppWillEnterForeground()
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+        
+        // Observe when app enters background
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleAppDidEnterBackground()
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+        
+        // Observe when app will resign active (about to lose focus)
+        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in
+                    self?.handleAppWillResignActive()
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+    }
+    
+    private func handleAppBecameActive() async {
+        print("📱 App became active")
+        print("🔍 State check: roomId=\(roomId.isEmpty ? "empty" : String(roomId.prefix(8))), isP2PConnected=\(isP2PConnected), hadP2POnce=\(hadP2POnce)")
+        print("🔍 wasInRoomBeforeDisconnect=\(wasInRoomBeforeDisconnect ?? "nil")")
+        
+        // Check if we're in a room but P2P is not connected, and we had P2P before
+        // This covers the case where connection dropped while phone was locked/backgrounded
+        if !roomId.isEmpty && !isP2PConnected && hadP2POnce {
+            print("🔄 Detected stuck in waiting state - auto-rejoining room: \(roomId.prefix(8))...")
+            let roomToRejoin = roomId
+            
+            // Leave first to clean up server state
+            leave(userInitiated: false)
+            // Wait a bit for leave to complete
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            
+            // Reconnect signaling if needed
+            if connectionStatus != .connected {
+                print("🔌 Reconnecting signaling...")
+                signaling.connect()
+                // Wait for connection
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            }
+            
+            // Rejoin the room
+            print("✅ Rejoining room: \(roomToRejoin.prefix(8))")
+            joinRoom(roomId: roomToRejoin)
+        } else if let savedRoomId = wasInRoomBeforeDisconnect, !savedRoomId.isEmpty {
+            // Fallback: use saved room from explicit disconnect tracking
+            print("🔄 App became active - auto-rejoining saved room: \(savedRoomId.prefix(8))...")
+            wasInRoomBeforeDisconnect = nil
+            
+            // Leave first if we're somehow still in a room
+            if !roomId.isEmpty {
+                leave(userInitiated: false)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            
+            // Reconnect signaling if needed
+            if connectionStatus != .connected {
+                signaling.connect()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            
+            // Rejoin the room
+            joinRoom(roomId: savedRoomId)
+        } else {
+            print("ℹ️ No auto-rejoin needed")
+        }
+    }
+    
+    private func handleAppWillResignActive() {
+        print("📱 App will resign active")
+        // Save current room if we're in one and P2P was established
+        if !roomId.isEmpty && hadP2POnce {
+            wasInRoomBeforeDisconnect = roomId
+            print("💾 App will resign active - saved room: \(roomId.prefix(8))")
+        } else {
+            print("ℹ️ Not saving room (isEmpty=\(roomId.isEmpty), hadP2P=\(hadP2POnce))")
+        }
+    }
+    
+    private func handleAppDidEnterBackground() {
+        print("📱 App entered background")
+        // Save current room if we're in one
+        if !roomId.isEmpty {
+            wasInRoomBeforeDisconnect = roomId
+            print("💾 Entered background - saved room: \(roomId.prefix(8))")
+        }
+    }
+    
+    private func handleAppWillEnterForeground() async {
+        print("📱 App entering foreground")
+        // This is called before didBecomeActive, so we'll let didBecomeActive handle the rejoin
+        // But we can ensure signaling is reconnected here
+        if connectionStatus != .connected {
+            print("🔌 Reconnecting signaling on foreground...")
+            signaling.connect()
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // Wait 1 second
+        }
     }
     
     @objc private func handleKeyExchangeReceived(_ notification: Notification) {
@@ -915,6 +1057,7 @@ class ChatManager: NSObject, ObservableObject {
         // Clear in-memory state
         keyExchangeHandler = nil
         currentSessionKeyId = nil
+        pendingPeerPublicKey = nil
         if !sessionId.isEmpty {
             encryptionStates.removeValue(forKey: sessionId)
         }
@@ -1052,6 +1195,17 @@ extension ChatManager: PeerConnectionManagerDelegate {
                 self.classifyConnectionPath()
             }
             remotePeerPresent = true
+        } else if !connected && was == true {
+            // P2P connection dropped - clean up encryption keys for security
+            print("🔒 P2P connection lost - wiping encryption keys")
+            cleanupEncryption()
+            connectionPath = .unknown
+            
+            // Save room for auto-rejoin when app returns to foreground
+            if !roomId.isEmpty {
+                wasInRoomBeforeDisconnect = roomId
+                print("💾 P2P dropped - saved room for auto-rejoin: \(roomId.prefix(8))")
+            }
         }
     }
     

@@ -44,6 +44,7 @@ enum SortDirection {
 struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
     @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var sessionNamespace
     @State private var goToChat = false
     @State private var goToPending = false
     @State private var renamingSession: ChatSession? = nil
@@ -99,15 +100,45 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    // Contacts (sorted dynamically)
-                    if !activeSessions.isEmpty {
+                    // Pending Sessions (only shown if there are any)
+                    if !pendingSessions.isEmpty {
                         Section {
-                            ForEach(activeSessions, id: \.id) { session in
+                            ForEach(pendingSessions, id: \.id) { session in
                                 sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
+                            }
+                        } header: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "hourglass")
+                                    .font(.caption)
+                                    .foregroundColor(.yellow)
+                                Text("Pending")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                    .textCase(nil)
+                            }
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    
+                    // Active Contacts (sorted dynamically)
+                    if !acceptedSessions.isEmpty {
+                        Section {
+                            ForEach(acceptedSessions, id: \.id) { session in
+                                sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .scale(scale: 0.8).combined(with: .opacity)
+                                    ))
                             }
                         } header: {
                             HStack {
-                                Text("Contacts")
+                                Text("Active")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.primary)
                                     .textCase(nil)
@@ -171,6 +202,11 @@ struct SessionsView: View {
                         Section {
                             ForEach(inactiveSessions, id: \.id) { session in
                                 sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                                        removal: .scale(scale: 0.7).combined(with: .opacity)
+                                    ))
                             }
                         } header: {
                             HStack {
@@ -192,9 +228,13 @@ struct SessionsView: View {
                             }
                             .padding(.trailing, 4)
                         }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .listStyle(.insetGrouped)
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: pendingSessions.map { $0.id })
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: acceptedSessions.map { $0.id })
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: inactiveSessions.map { $0.id })
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
@@ -237,7 +277,36 @@ struct SessionsView: View {
     
     // MARK: - Session Categorization
     
+    private var pendingSessions: [ChatSession] {
+        chat.sessions
+            .filter { $0.status == .pending }
+            .sorted { $0.createdAt > $1.createdAt } // Newest pending first
+    }
+    
+    private var acceptedSessions: [ChatSession] {
+        let filtered = chat.sessions.filter { $0.status == .accepted }
+        let sorted: [ChatSession]
+        
+        switch contactsSortMode {
+        case .lastActivity:
+            sorted = filtered.sorted { 
+                sortDirection == .descending 
+                    ? $0.lastActivityDate > $1.lastActivityDate 
+                    : $0.lastActivityDate < $1.lastActivityDate 
+            }
+        case .created:
+            sorted = filtered.sorted { 
+                sortDirection == .descending 
+                    ? $0.createdAt > $1.createdAt 
+                    : $0.createdAt < $1.createdAt 
+            }
+        }
+        
+        return sorted
+    }
+    
     private var activeSessions: [ChatSession] {
+        // Keep for backward compatibility, combines pending + accepted
         let filtered = chat.sessions.filter { $0.status == .pending || $0.status == .accepted }
         let sorted: [ChatSession]
         
@@ -262,7 +331,12 @@ struct SessionsView: View {
     private var inactiveSessions: [ChatSession] {
         chat.sessions
             .filter { $0.status == .closed || $0.status == .expired }
-            .sorted { $0.lastActivityDate > $1.lastActivityDate }
+            .sorted { session1, session2 in
+                // Sort by the date when they became inactive (closedAt or expiresAt)
+                let date1 = session1.status == .closed ? (session1.closedAt ?? session1.lastActivityDate) : (session1.expiresAt ?? session1.lastActivityDate)
+                let date2 = session2.status == .closed ? (session2.closedAt ?? session2.lastActivityDate) : (session2.expiresAt ?? session2.lastActivityDate)
+                return date1 > date2 // Most recently closed/expired first
+            }
     }
     
     // MARK: - Session Row
@@ -282,26 +356,10 @@ struct SessionsView: View {
                 goToChat = true
             }
         } label: {
-            HStack(spacing: 12) {
-                statusDot(for: session)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.displayName)
-                        .font(.body.weight(.semibold))
-                    subtitleView(for: session)
-                }
-                Spacer()
-                if session.status == .pending {
-                    Button {
-                        showQRForSession = session
-                    } label: {
-                        Image(systemName: "qrcode")
-                            .font(.footnote)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundColor(Color(UIColor.tertiaryLabel))
+            if session.status == .pending {
+                pendingSessionRow(session)
+            } else {
+                standardSessionRow(session)
             }
         }
         .buttonStyle(.plain)
@@ -309,7 +367,9 @@ struct SessionsView: View {
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 chat.removeSession(session)
-            } label: { Label("Delete", systemImage: "trash") }
+            } label: { 
+                Image(systemName: "trash")
+            }
         }
         .contextMenu {
             Button {
@@ -323,6 +383,80 @@ struct SessionsView: View {
                     Task { await chat.deleteRoomOnServer(roomId: rid) }
                 } label: { Label("Delete on server", systemImage: "xmark.bin") }
             }
+        }
+    }
+    
+    // Enhanced pending session row with prominent visual style
+    @ViewBuilder
+    private func pendingSessionRow(_ session: ChatSession) -> some View {
+        HStack(spacing: 14) {
+            // Pulsing status indicator
+            ZStack {
+                Circle()
+                    .fill(Color.yellow.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .fill(Color.yellow)
+                    .frame(width: 12, height: 12)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.displayName)
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(.primary)
+                
+                HStack(spacing: 6) {
+                    Text("Code: \(session.code)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    
+                    if let expires = session.expiresAt {
+                        Text("•")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        CountdownTimerView(expiresAt: expires)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            // QR Code button
+            Button {
+                showQRForSession = session
+            } label: {
+                Image(systemName: "qrcode")
+                    .font(.title3)
+                    .foregroundColor(.accentColor)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.accentColor.opacity(0.1))
+                    )
+            }
+            .buttonStyle(.plain)
+            
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(Color(UIColor.tertiaryLabel))
+        }
+        .padding(.vertical, 4)
+    }
+    
+    // Standard row for active/closed/expired sessions
+    @ViewBuilder
+    private func standardSessionRow(_ session: ChatSession) -> some View {
+        HStack(spacing: 12) {
+            statusDot(for: session)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.displayName)
+                    .font(.body.weight(.semibold))
+                subtitleView(for: session)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundColor(Color(UIColor.tertiaryLabel))
         }
     }
     
