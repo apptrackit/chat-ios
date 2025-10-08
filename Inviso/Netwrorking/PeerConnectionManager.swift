@@ -4,7 +4,8 @@ import WebRTC
 protocol PeerConnectionManagerDelegate: AnyObject {
     func pcmDidGenerateIce(_ candidate: RTCIceCandidate)
     func pcmIceStateChanged(connected: Bool)
-    func pcmDidReceiveMessage(_ text: String)
+    func pcmDidReceiveMessage(_ text: String) // Legacy text message (deprecated)
+    func pcmDidReceiveData(_ data: Data) // Binary encrypted message
 }
 
 final class PeerConnectionManager: NSObject {
@@ -116,6 +117,12 @@ final class PeerConnectionManager: NSObject {
         let buf = RTCDataBuffer(data: Data(text.utf8), isBinary: false)
         return dc.sendData(buf)
     }
+    
+    func sendData(_ data: Data) -> Bool {
+        guard let dc = dataChannel, dc.readyState == .open else { return false }
+        let buf = RTCDataBuffer(data: data, isBinary: true)
+        return dc.sendData(buf)
+    }
 
     private func flushPending() { guard let pc = pc else { return }; pending.forEach { pc.add($0, completionHandler: { _ in }) }; pending.removeAll() }
 
@@ -160,8 +167,12 @@ extension PeerConnectionManager: RTCPeerConnectionDelegate {
 extension PeerConnectionManager: RTCDataChannelDelegate {
     func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
     func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
-        if let text = String(data: buffer.data, encoding: .utf8) {
-            DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.async { [weak self] in
+            if buffer.isBinary {
+                // Binary encrypted message
+                self?.delegate?.pcmDidReceiveData(buffer.data)
+            } else if let text = String(data: buffer.data, encoding: .utf8) {
+                // Legacy text message (for backwards compatibility)
                 self?.delegate?.pcmDidReceiveMessage(text)
             }
         }
