@@ -309,7 +309,9 @@ struct SessionsView: View {
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 chat.removeSession(session)
-            } label: { Label("Delete", systemImage: "trash") }
+            } label: { 
+                Image(systemName: "trash")
+            }
         }
         .contextMenu {
             Button {
