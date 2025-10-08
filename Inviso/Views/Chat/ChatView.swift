@@ -57,54 +57,54 @@ struct ChatView: View {
                 .accessibilityLabel("Back")
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 8) {
-                    // Encryption indicator
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            showConnectionCard.toggle()
-                        }
-                    } label: {
+                // Combined connection and encryption indicator button
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showConnectionCard.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        // Encryption status
                         if chat.keyExchangeInProgress {
-                            HStack(spacing: 4) {
-                                ProgressView()
-                                    .scaleEffect(0.7)
-                                Text("Encrypting")
-                                    .font(.caption2)
-                                    .foregroundColor(.orange)
-                            }
-                            .accessibilityLabel("Establishing encryption")
+                            ProgressView()
+                                .scaleEffect(0.7)
+                            Text("Encrypting")
+                                .font(.caption2)
+                                .foregroundColor(.orange)
                         } else if chat.isEncryptionReady {
-                            HStack(spacing: 4) {
-                                Image(systemName: "lock.fill")
-                                    .font(.caption)
-                                    .foregroundColor(.green)
-                                Text("E2EE")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundColor(.green)
-                            }
-                            .accessibilityLabel("End-to-end encrypted")
-                            .accessibilityHint("Tap to show connection details")
+                            Image(systemName: "lock.fill")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                            Text("E2EE")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(.green)
                         } else if chat.isP2PConnected {
                             Image(systemName: "lock.open.fill")
                                 .font(.caption)
                                 .foregroundColor(.red)
-                                .accessibilityLabel("Not encrypted")
-                                .accessibilityHint("Tap to show connection details")
                         }
+                        
+                        // Connection status dot
+                        Circle()
+                            .fill(chat.isP2PConnected ? Color.green : Color.yellow)
+                            .frame(width: 10, height: 10)
                     }
-                    .buttonStyle(.plain)
-                    
-                    // Connection status dot
-                    Circle()
-                        .fill(chat.isP2PConnected ? Color.green : Color.yellow)
-                        .frame(width: 10, height: 10)
-                        .accessibilityLabel(chat.isP2PConnected ? "Connected" : "Waiting")
-                        .accessibilityHint("P2P signaling state")
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    chat.isEncryptionReady ? "End-to-end encrypted" :
+                    chat.keyExchangeInProgress ? "Establishing encryption" :
+                    chat.isP2PConnected ? "Connected, not encrypted" :
+                    "Waiting for connection"
+                )
+                .accessibilityHint("Tap to show connection details")
             }
         }
         .overlay(alignment: .top) {
-            if chat.isP2PConnected && showConnectionCard {
+            if showConnectionCard {
                 connectionCard
                     .padding(.top, 4)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -172,23 +172,46 @@ struct ChatView: View {
 
     private var connectionCard: some View {
         VStack(spacing: 10) {
-            // Connection path info
-            HStack(spacing: 10) {
-                Image(systemName: iconForPath(chat.connectionPath))
-                    .foregroundColor(colorForPath(chat.connectionPath))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(chat.connectionPath.displayName)
-                        .font(.caption.weight(.semibold))
-                    Text(latencyHint)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+            // Connection path info or waiting status
+            if chat.isP2PConnected {
+                HStack(spacing: 10) {
+                    Image(systemName: iconForPath(chat.connectionPath))
+                        .foregroundColor(colorForPath(chat.connectionPath))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(chat.connectionPath.displayName)
+                            .font(.caption.weight(.semibold))
+                        Text(latencyHint)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Text(chat.connectionPath.shortLabel)
+                        .font(.caption2.weight(.bold))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Capsule().fill(colorForPath(chat.connectionPath).opacity(0.15)))
                 }
-                Spacer(minLength: 0)
-                Text(chat.connectionPath.shortLabel)
-                    .font(.caption2.weight(.bold))
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
-                    .background(Capsule().fill(colorForPath(chat.connectionPath).opacity(0.15)))
+            } else {
+                // Waiting for P2P connection
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Waiting for Peer")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.yellow)
+                        Text("Establishing P2P connection…")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Text("WAITING")
+                        .font(.caption2.weight(.bold))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Capsule().fill(Color.yellow.opacity(0.15)))
+                        .foregroundColor(.yellow)
+                }
             }
             
             // Encryption status
@@ -220,21 +243,23 @@ struct ChatView: View {
                 }
             }
         }
-        .padding(10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(
                     chat.isEncryptionReady ? Color.green.opacity(0.3) :
                     chat.keyExchangeInProgress ? Color.orange.opacity(0.3) :
-                    colorForPath(chat.connectionPath).opacity(0.25),
+                    chat.isP2PConnected ? colorForPath(chat.connectionPath).opacity(0.25) :
+                    Color.yellow.opacity(0.3),
                     lineWidth: 1
                 )
         )
-        .padding(.horizontal)
         .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .padding(.horizontal, 8)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Connection: \(chat.connectionPath.displayName). Encryption: \(chat.isEncryptionReady ? "Active" : chat.keyExchangeInProgress ? "In progress" : "None")")
+        .accessibilityLabel("Connection: \(chat.isP2PConnected ? chat.connectionPath.displayName : "Waiting"). Encryption: \(chat.isEncryptionReady ? "Active" : chat.keyExchangeInProgress ? "In progress" : "None")")
     }
 
     private func iconForPath(_ path: ChatManager.ConnectionPath) -> String {
