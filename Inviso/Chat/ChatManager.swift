@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 import WebRTC
 import Combine
 import CryptoKit
@@ -376,7 +377,9 @@ class ChatManager: NSObject, ObservableObject {
     func markActiveSessionAccepted() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         if sessions[idx].status != .accepted {
-            sessions[idx].status = .accepted
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                sessions[idx].status = .accepted
+            }
             // Set first connected timestamp if not already set
             if sessions[idx].firstConnectedAt == nil {
                 sessions[idx].firstConnectedAt = Date()
@@ -387,7 +390,9 @@ class ChatManager: NSObject, ObservableObject {
 
     func closeActiveSession() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        sessions[idx].status = .closed
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+            sessions[idx].status = .closed
+        }
         // Set closed timestamp
         if sessions[idx].closedAt == nil {
             sessions[idx].closedAt = Date()
@@ -535,7 +540,9 @@ class ChatManager: NSObject, ObservableObject {
                     let result = await checkPendingOnServer(session: s)
                     switch result {
                     case .accepted(let roomId):
-                        sessions[i].status = .accepted
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .accepted
+                        }
                         sessions[i].roomId = roomId
                         // Set first connected timestamp if not already set
                         if sessions[i].firstConnectedAt == nil {
@@ -543,7 +550,9 @@ class ChatManager: NSObject, ObservableObject {
                         }
                         persistSessions()
                     case .expired:
-                        sessions[i].status = .expired
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .expired
+                        }
                         persistSessions()
                     case .stillPending, .error:
                         break // Keep current state
@@ -558,7 +567,9 @@ class ChatManager: NSObject, ObservableObject {
                     case .exists:
                         break // all good
                     case .notFound:
-                        sessions[i].status = .closed
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                            sessions[i].status = .closed
+                        }
                         sessions[i].roomId = nil
                         // Set closed timestamp if not already set
                         if sessions[i].closedAt == nil {

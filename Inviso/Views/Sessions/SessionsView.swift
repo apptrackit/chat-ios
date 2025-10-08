@@ -44,6 +44,7 @@ enum SortDirection {
 struct SessionsView: View {
     @EnvironmentObject private var chat: ChatManager
     @Environment(\.scenePhase) private var scenePhase
+    @Namespace private var sessionNamespace
     @State private var goToChat = false
     @State private var goToPending = false
     @State private var renamingSession: ChatSession? = nil
@@ -104,6 +105,11 @@ struct SessionsView: View {
                         Section {
                             ForEach(pendingSessions, id: \.id) { session in
                                 sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)
+                                    ))
                             }
                         } header: {
                             HStack(spacing: 8) {
@@ -116,6 +122,7 @@ struct SessionsView: View {
                                     .textCase(nil)
                             }
                         }
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     
                     // Active Contacts (sorted dynamically)
@@ -123,6 +130,11 @@ struct SessionsView: View {
                         Section {
                             ForEach(acceptedSessions, id: \.id) { session in
                                 sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .scale(scale: 0.8).combined(with: .opacity)
+                                    ))
                             }
                         } header: {
                             HStack {
@@ -190,6 +202,11 @@ struct SessionsView: View {
                         Section {
                             ForEach(inactiveSessions, id: \.id) { session in
                                 sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                                    .transition(.asymmetric(
+                                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                                        removal: .scale(scale: 0.7).combined(with: .opacity)
+                                    ))
                             }
                         } header: {
                             HStack {
@@ -211,9 +228,13 @@ struct SessionsView: View {
                             }
                             .padding(.trailing, 4)
                         }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
                 .listStyle(.insetGrouped)
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: pendingSessions.map { $0.id })
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: acceptedSessions.map { $0.id })
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: inactiveSessions.map { $0.id })
             }
         }
         .background(Color(UIColor.systemGroupedBackground))
@@ -310,7 +331,12 @@ struct SessionsView: View {
     private var inactiveSessions: [ChatSession] {
         chat.sessions
             .filter { $0.status == .closed || $0.status == .expired }
-            .sorted { $0.lastActivityDate > $1.lastActivityDate }
+            .sorted { session1, session2 in
+                // Sort by the date when they became inactive (closedAt or expiresAt)
+                let date1 = session1.status == .closed ? (session1.closedAt ?? session1.lastActivityDate) : (session1.expiresAt ?? session1.lastActivityDate)
+                let date2 = session2.status == .closed ? (session2.closedAt ?? session2.lastActivityDate) : (session2.expiresAt ?? session2.lastActivityDate)
+                return date1 > date2 // Most recently closed/expired first
+            }
     }
     
     // MARK: - Session Row
