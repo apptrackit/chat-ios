@@ -131,12 +131,17 @@ struct ChatView: View {
         .safeAreaInset(edge: .bottom) {
             Group {
                 let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let canSend = chat.isP2PConnected && chat.isEncryptionReady
                 HStack(spacing: 8) {
-                    SearchBarField(text: $input, placeholder: chat.isP2PConnected ? "Message" : "Waiting for P2P…", onSubmit: { send() })
+                    SearchBarField(
+                        text: $input,
+                        placeholder: canSend ? "Message" : chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",
+                        onSubmit: { send() }
+                    )
                         .frame(height: 36)
-                        .disabled(!chat.isP2PConnected)
-                        .opacity(chat.isP2PConnected ? 1 : 0.6)
-                    if hasText && chat.isP2PConnected {
+                        .disabled(!canSend)
+                        .opacity(canSend ? 1 : 0.6)
+                    if hasText && canSend {
                         Button(action: send) {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
@@ -157,7 +162,7 @@ struct ChatView: View {
 
     private func send() {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, chat.isP2PConnected else { return }
+        guard !trimmed.isEmpty, chat.isP2PConnected, chat.isEncryptionReady else { return }
         chat.sendMessage(trimmed)
         input = ""
     }
