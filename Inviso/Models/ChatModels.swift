@@ -47,8 +47,11 @@ struct ChatSession: Identifiable, Equatable, Codable {
     // Encryption status (for UI display)
     var encryptionEnabled: Bool = true // Always true for new sessions
     var keyExchangeCompletedAt: Date? // Timestamp when E2EE was established
+    
+    // Role persistence for reconnections
+    var wasOriginalInitiator: Bool? // Tracks first assigned role to maintain consistency across rejoins
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil, wasOriginalInitiator: Bool? = nil) {
         self.id = id
         self.name = name
         self.code = code
@@ -63,11 +66,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.ephemeralDeviceId = ephemeralDeviceId
         self.encryptionEnabled = encryptionEnabled
         self.keyExchangeCompletedAt = keyExchangeCompletedAt
+        self.wasOriginalInitiator = wasOriginalInitiator
     }
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator
     }
     
     init(from decoder: Decoder) throws {
@@ -88,6 +92,8 @@ struct ChatSession: Identifiable, Equatable, Codable {
         // Encryption fields (default to true/nil for backward compatibility)
         encryptionEnabled = try container.decodeIfPresent(Bool.self, forKey: .encryptionEnabled) ?? true
         keyExchangeCompletedAt = try container.decodeIfPresent(Date.self, forKey: .keyExchangeCompletedAt)
+        // Role persistence (nil for old sessions)
+        wasOriginalInitiator = try container.decodeIfPresent(Bool.self, forKey: .wasOriginalInitiator)
     }
 
     var displayName: String {

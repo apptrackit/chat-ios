@@ -276,8 +276,8 @@ class ChatManager: NSObject, ObservableObject {
         // If already have an accepted or pending session with this code, select it
         if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
-            // If already accepted and have roomId, join room automatically
-            if let rid = existing.roomId { joinRoom(roomId: rid) }
+            // DON'T auto-join WebSocket - user must explicitly open ChatView
+            // if let rid = existing.roomId { joinRoom(roomId: rid) }
             return
         }
         // Otherwise attempt accept flow
@@ -285,7 +285,8 @@ class ChatManager: NSObject, ObservableObject {
             guard let self = self else { return }
             if let result = await self.acceptJoinCode(code) {
                 let session = self.addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
-                self.joinRoom(roomId: result.roomId)
+                // DON'T auto-join WebSocket room yet - wait until user opens ChatView
+                // self.joinRoom(roomId: result.roomId)
                 self.activeSessionId = session.id
                 // Register ephemeral ID
                 DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
@@ -317,15 +318,16 @@ class ChatManager: NSObject, ObservableObject {
         // If already have an accepted or pending session with this code, select it
         if let existing = sessions.first(where: { $0.code == code && $0.status != .closed && $0.status != .expired }) {
             activeSessionId = existing.id
-            // If already accepted and have roomId, join room automatically
-            if let rid = existing.roomId { joinRoom(roomId: rid) }
+            // DON'T auto-join WebSocket - user must explicitly open ChatView
+            // if let rid = existing.roomId { joinRoom(roomId: rid) }
             return true
         }
         
         // Otherwise attempt accept flow
         if let result = await acceptJoinCode(code) {
             let session = addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
-            joinRoom(roomId: result.roomId)
+            // DON'T auto-join WebSocket room yet - wait until user opens ChatView
+            // joinRoom(roomId: result.roomId)
             activeSessionId = session.id
             // Register ephemeral ID
             DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
@@ -792,10 +794,25 @@ class ChatManager: NSObject, ObservableObject {
             state.keyExchangeComplete = true
             encryptionStates[sessionId] = state
             
-            // Determine role based on server-assigned value (fallback to old logic)
-            let isInitiator = serverAssignedIsInitiator ?? (self.roomId == sessionId && hadP2POnce == false)
+            // Determine role: Use stored original role if available, otherwise use server-assigned
+            let storedRole = sessions.first(where: { $0.roomId == self.roomId })?.wasOriginalInitiator
+            let isInitiator: Bool
             
-            print("🔍 [DEBUG] Role determination: isInitiator=\(isInitiator), serverAssigned=\(String(describing: serverAssignedIsInitiator)), roomId=\(self.roomId), sessionId=\(sessionId), hadP2POnce=\(hadP2POnce)")
+            if let stored = storedRole {
+                // Use persisted original role for consistency across rejoins
+                isInitiator = stored
+                print("🔍 [DEBUG] Using STORED original role: \(isInitiator ? "INITIATOR" : "RESPONDER")")
+            } else if let serverAssigned = serverAssignedIsInitiator {
+                // First time joining - use server assignment
+                isInitiator = serverAssigned
+                print("🔍 [DEBUG] Using SERVER assigned role: \(isInitiator ? "INITIATOR" : "RESPONDER")")
+            } else {
+                // Fallback (shouldn't happen)
+                isInitiator = (self.roomId == sessionId && hadP2POnce == false)
+                print("🔍 [DEBUG] Using FALLBACK role: \(isInitiator ? "INITIATOR" : "RESPONDER")")
+            }
+            
+            print("🔍 [DEBUG] Role determination: isInitiator=\(isInitiator), storedRole=\(String(describing: storedRole)), serverAssigned=\(String(describing: serverAssignedIsInitiator)), roomId=\(self.roomId), sessionId=\(sessionId), hadP2POnce=\(hadP2POnce)")
             
             // If we're the responder, send key_exchange_complete
             if !isInitiator {
@@ -918,6 +935,17 @@ class ChatManager: NSObject, ObservableObject {
             if let isInitiator = json["isInitiator"] as? Bool {
                 serverAssignedIsInitiator = isInitiator
                 print("🔍 [DEBUG] Server assigned role: \(isInitiator ? "INITIATOR" : "RESPONDER")")
+                
+                // Store this as the original role for the active session if not already set
+                if let activeId = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == activeId }) {
+                    if sessions[idx].wasOriginalInitiator == nil {
+                        sessions[idx].wasOriginalInitiator = isInitiator
+                        persistSessions()
+                        print("🔍 [DEBUG] Stored original role for session: wasOriginalInitiator=\(isInitiator)")
+                    } else {
+                        print("🔍 [DEBUG] Using stored original role: wasOriginalInitiator=\(sessions[idx].wasOriginalInitiator!)")
+                    }
+                }
             }
             // Reset per-room P2P flag; initial connect shouldn't create a system message
             hadP2POnce = false

@@ -100,7 +100,8 @@ struct JoinRoomModal: View {
                                     _ = chat.addAcceptedSession(name: nil, code: code, roomId: result.roomId, ephemeralId: result.ephemeralId, isCreatedByMe: false)
                                     // Register ephemeral ID
                                     DeviceIDManager.shared.registerEphemeralID(result.ephemeralId, sessionName: nil, code: code)
-                                    chat.joinRoom(roomId: result.roomId)
+                                    // DON'T auto-join WebSocket - user must explicitly open ChatView
+                                    // chat.joinRoom(roomId: result.roomId)
                                     withAnimation(.spring()) {
                                         showNameStep = true
                                         joinFieldFocused = false
