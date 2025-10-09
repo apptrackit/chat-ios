@@ -47,6 +47,8 @@ struct SessionsView: View {
     @Namespace private var sessionNamespace
     @State private var goToChat = false
     @State private var showPendingRoomModal: ChatSession? = nil
+    @State private var showRoomSettings: ChatSession? = nil
+    @State private var sessionToDelete: ChatSession? = nil
     @State private var renamingSession: ChatSession? = nil
     @State private var renameText: String = ""
     @State private var isVisible = false
@@ -288,6 +290,12 @@ struct SessionsView: View {
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showAboutForSession = nil } } }
             }
         }
+        .sheet(item: $showRoomSettings) { sess in
+            NavigationView {
+                RoomSettingsView(session: sess)
+                    .environmentObject(chat)
+            }
+        }
         .alert("Clear All Closed & Expired?", isPresented: $showClearAllConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Clear All", role: .destructive) {
@@ -295,6 +303,24 @@ struct SessionsView: View {
             }
         } message: {
             Text("This will permanently delete all closed and expired sessions. This action cannot be undone.")
+        }
+        .alert("Delete Session?", isPresented: Binding(
+            get: { sessionToDelete != nil },
+            set: { if !$0 { sessionToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                sessionToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let session = sessionToDelete {
+                    chat.removeSession(session)
+                    sessionToDelete = nil
+                }
+            }
+        } message: {
+            if let session = sessionToDelete {
+                Text("Are you sure you want to remove \"\(session.displayName)\" from your device?")
+            }
         }
     }
     
@@ -392,22 +418,22 @@ struct SessionsView: View {
         .disabled(chat.connectionStatus != .connected && session.status != .pending)
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
-                chat.removeSession(session)
+                sessionToDelete = session
             } label: { 
                 Image(systemName: "trash")
             }
         }
         .contextMenu {
             Button {
-                promptRename(session)
-            } label: { Label("Rename", systemImage: "pencil") }
-            Button {
-                showAboutForSession = session
-            } label: { Label("About", systemImage: "info.circle") }
-            if let rid = session.roomId {
-                Button(role: .destructive) {
-                    Task { await chat.deleteRoomOnServer(roomId: rid) }
-                } label: { Label("Delete on server", systemImage: "xmark.bin") }
+                showRoomSettings = session
+            } label: { 
+                Label("Settings", systemImage: "gearshape")
+            }
+            
+            Button(role: .destructive) {
+                sessionToDelete = session
+            } label: { 
+                Label("Delete", systemImage: "trash")
             }
         }
     }
