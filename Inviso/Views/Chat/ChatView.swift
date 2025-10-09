@@ -39,7 +39,7 @@ struct ChatView: View {
             }
 
         }
-        .navigationTitle("Chat")
+        .navigationTitle(chat.activeSessionDisplayName)
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
         .navigationBarBackButtonHidden(true)

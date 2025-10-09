@@ -448,6 +448,19 @@ class ChatManager: NSObject, ObservableObject {
         persistSessions()
         return s
     }
+    
+    // MARK: - Active Session Helpers
+    
+    /// Get the currently active session
+    var activeSession: ChatSession? {
+        guard let id = activeSessionId else { return nil }
+        return sessions.first(where: { $0.id == id })
+    }
+    
+    /// Get the display name for the active session
+    var activeSessionDisplayName: String {
+        activeSession?.displayName ?? "Chat"
+    }
 
     // MARK: - Backend REST integration
     private func createPendingOnServer(session: ChatSession, originalMinutes: Int) async {
