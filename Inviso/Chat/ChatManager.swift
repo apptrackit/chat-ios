@@ -182,6 +182,9 @@ class ChatManager: NSObject, ObservableObject {
         }
         
         do {
+            // LOG: Show plaintext being sent
+            print("📤 [E2EE] Sending message: \"\(text)\"")
+            
             // Get session key from Keychain
             guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
                   sessionKeyData.count == EncryptionConstants.sessionKeySize else {
@@ -209,6 +212,13 @@ class ChatManager: NSObject, ObservableObject {
             // Serialize to JSON
             let encoder = JSONEncoder()
             let jsonData = try encoder.encode(wireFormat)
+            
+            // LOG: Show encrypted data
+            let encryptedDataHex = jsonData.prefix(64).map { String(format: "%02x", $0) }.joined()
+            let encryptedDataBase64 = jsonData.prefix(128).base64EncodedString()
+            print("📦 [E2EE] Encrypted data (\(jsonData.count) bytes)")
+            print("   Hex (first 64 bytes): \(encryptedDataHex)")
+            print("   Base64 (first 128 bytes): \(encryptedDataBase64)")
             
             // Send encrypted binary data over DataChannel
             let ok = pcm.sendData(jsonData)
@@ -1245,6 +1255,13 @@ extension ChatManager: PeerConnectionManagerDelegate {
         }
         
         do {
+            // LOG: Show raw encrypted data
+            let encryptedDataHex = data.prefix(64).map { String(format: "%02x", $0) }.joined()
+            let encryptedDataBase64 = data.prefix(128).base64EncodedString()
+            print("📦 [E2EE] Received encrypted data (\(data.count) bytes)")
+            print("   Hex (first 64 bytes): \(encryptedDataHex)")
+            print("   Base64 (first 128 bytes): \(encryptedDataBase64)")
+            
             // Deserialize wire format
             let decoder = JSONDecoder()
             let wireFormat = try decoder.decode(MessageWireFormat.self, from: data)
@@ -1272,6 +1289,9 @@ extension ChatManager: PeerConnectionManagerDelegate {
                 sessionKey: sessionKey,
                 direction: .send  // Use .send to match the sender's encryption
             )
+            
+            // LOG: Show decrypted plaintext
+            print("✅ [E2EE] Decrypted message: \"\(plaintext)\"")
             
             // Update receive counter
             state.receiveCounter = max(state.receiveCounter, wireFormat.c + 1)
