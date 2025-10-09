@@ -46,7 +46,7 @@ struct SessionsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Namespace private var sessionNamespace
     @State private var goToChat = false
-    @State private var goToPending = false
+    @State private var showPendingRoomModal: ChatSession? = nil
     @State private var renamingSession: ChatSession? = nil
     @State private var renameText: String = ""
     @State private var isVisible = false
@@ -73,11 +73,6 @@ struct SessionsView: View {
             }
             .navigationDestination(isPresented: $goToChat) {
                 ChatView()
-            }
-            .navigationDestination(isPresented: $goToPending) {
-                if let pendingSession = pendingSelectedSession {
-                    PendingSessionView(session: pendingSession)
-                }
             }
             .onReceive(ticker) { _ in
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
@@ -247,14 +242,42 @@ struct SessionsView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 .zIndex(999)
             }
+            
+            if let pendingSession = showPendingRoomModal {
+                PendingRoomCodeModal(
+                    session: pendingSession,
+                    isPresented: Binding(
+                        get: { showPendingRoomModal != nil },
+                        set: { if !$0 { showPendingRoomModal = nil } }
+                    )
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .zIndex(1000)
+            }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showQRForSession != nil)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showPendingRoomModal != nil)
         .onChange(of: chat.sessions) {
             // Auto-close QR modal when session becomes accepted or expired
             if let qrSession = showQRForSession {
                 if let updated = chat.sessions.first(where: { $0.id == qrSession.id }) {
                     if updated.status == .accepted || updated.status == .expired {
                         withAnimation(.spring()) { showQRForSession = nil }
+                    }
+                }
+            }
+            // Auto-close pending modal when session becomes accepted
+            if let pendingSession = showPendingRoomModal {
+                if let updated = chat.sessions.first(where: { $0.id == pendingSession.id }) {
+                    if updated.status == .accepted {
+                        withAnimation(.spring()) { showPendingRoomModal = nil }
+                        // Then navigate to chat
+                        if let rid = updated.roomId {
+                            chat.joinRoom(roomId: rid)
+                            goToChat = true
+                        }
+                    } else if updated.status == .expired {
+                        withAnimation(.spring()) { showPendingRoomModal = nil }
                     }
                 }
             }
@@ -349,9 +372,12 @@ struct SessionsView: View {
             // Block interaction for expired sessions
             guard session.status != .expired else { return }
             chat.selectSession(session)
+            
             if session.status == .pending {
-                goToPending = true
-            } else if let rid = session.roomId { // accepted
+                // Show the pending room modal with code
+                showPendingRoomModal = session
+            } else if let rid = session.roomId {
+                // Accepted session - join room and go to chat
                 chat.joinRoom(roomId: rid)
                 goToChat = true
             }
@@ -501,11 +527,6 @@ struct SessionsView: View {
         case .expired:
             return "Expired • Code \(s.code)"
         }
-    }
-
-    private var pendingSelectedSession: ChatSession? {
-        guard goToPending, let id = chat.activeSessionId else { return nil }
-        return chat.sessions.first(where: { $0.id == id })
     }
 }
 
