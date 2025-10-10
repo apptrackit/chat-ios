@@ -33,6 +33,12 @@ struct ChatView: View {
                     }
                     .padding(.vertical, 12)
                 }
+                .simultaneousGesture(
+                    DragGesture().onChanged { _ in
+                        // Dismiss keyboard when user starts scrolling
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
                 .onChange(of: chat.messages.count) {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
@@ -328,14 +334,8 @@ struct ChatBubble: View {
                     .padding(10)
                     .foregroundColor(message.isFromSelf ? .white : .primary)
                     .background(
-                        Group {
-                            if message.isFromSelf {
-                                Capsule().fill(Color.accentColor)
-                            } else {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(Color(UIColor.secondarySystemBackground))
-                            }
-                        }
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
                     )
                 if showTime {
                     Text(message.time, style: .time)
