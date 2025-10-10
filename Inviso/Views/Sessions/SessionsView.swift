@@ -54,7 +54,6 @@ struct SessionsView: View {
     @State private var isVisible = false
     @State private var ticker = Timer.publish(every: 6.0, on: .main, in: .common).autoconnect()
     @State private var showQRForSession: ChatSession? = nil
-    @State private var showAboutForSession: ChatSession? = nil
     @State private var showClearAllConfirmation = false
     @State private var contactsSortMode: ContactsSortMode = .lastActivity
     @State private var sortDirection: SortDirection = .descending
@@ -284,12 +283,6 @@ struct SessionsView: View {
                 }
             }
         }
-        .sheet(item: $showAboutForSession) { sess in
-            NavigationView {
-                SessionAboutView(session: sess)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showAboutForSession = nil } } }
-            }
-        }
         .sheet(item: $showRoomSettings) { sess in
             NavigationView {
                 RoomSettingsView(session: sess)
@@ -473,6 +466,13 @@ struct SessionsView: View {
             
             Spacer()
             
+            VStack(alignment: .trailing, spacing: 4) {
+                // Last activity on the right
+                Text(formatRelativeDate(session.lastActivityDate))
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            
             // QR Code button
             Button {
                 showQRForSession = session
@@ -505,7 +505,16 @@ struct SessionsView: View {
                     .font(.body.weight(.semibold))
                 subtitleView(for: session)
             }
+            
             Spacer()
+            
+            VStack(alignment: .trailing, spacing: 4) {
+                // Last activity on the right
+                Text(formatRelativeDate(session.lastActivityDate))
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundColor(Color(UIColor.tertiaryLabel))
@@ -584,6 +593,12 @@ extension SessionsView {
         for session in sessionsToRemove {
             chat.removeSession(session)
         }
+    }
+    
+    private func formatRelativeDate(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
