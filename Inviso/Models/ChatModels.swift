@@ -50,8 +50,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
     
     // Role persistence for reconnections
     var wasOriginalInitiator: Bool? // Tracks first assigned role to maintain consistency across rejoins
+    
+    // Pin feature
+    var isPinned: Bool = false
+    var pinnedOrder: Int? // Lower numbers appear first, nil if not pinned
 
-    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil, wasOriginalInitiator: Bool? = nil) {
+    init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil, wasOriginalInitiator: Bool? = nil, isPinned: Bool = false, pinnedOrder: Int? = nil) {
         self.id = id
         self.name = name
         self.code = code
@@ -67,11 +71,13 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.encryptionEnabled = encryptionEnabled
         self.keyExchangeCompletedAt = keyExchangeCompletedAt
         self.wasOriginalInitiator = wasOriginalInitiator
+        self.isPinned = isPinned
+        self.pinnedOrder = pinnedOrder
     }
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder
     }
     
     init(from decoder: Decoder) throws {
@@ -94,6 +100,9 @@ struct ChatSession: Identifiable, Equatable, Codable {
         keyExchangeCompletedAt = try container.decodeIfPresent(Date.self, forKey: .keyExchangeCompletedAt)
         // Role persistence (nil for old sessions)
         wasOriginalInitiator = try container.decodeIfPresent(Bool.self, forKey: .wasOriginalInitiator)
+        // Pin feature (default to false/nil for backward compatibility)
+        isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
     }
 
     var displayName: String {

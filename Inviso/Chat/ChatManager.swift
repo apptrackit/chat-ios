@@ -448,6 +448,55 @@ class ChatManager: NSObject, ObservableObject {
         if activeSessionId == session.id { activeSessionId = nil }
         persistSessions()
     }
+    
+    /// Pin a session - adds it to pinned section with newest pinnedOrder
+    func pinSession(_ session: ChatSession) {
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        guard !sessions[idx].isPinned else { return } // Already pinned
+        
+        // Get the highest pinnedOrder and add 1 (new pins go to bottom of pinned list)
+        let maxOrder = sessions.compactMap { $0.pinnedOrder }.max() ?? -1
+        sessions[idx].isPinned = true
+        sessions[idx].pinnedOrder = maxOrder + 1
+        persistSessions()
+    }
+    
+    /// Unpin a session - removes from pinned section and reorders remaining pinned items
+    func unpinSession(_ session: ChatSession) {
+        guard let idx = sessions.firstIndex(where: { $0.id == session.id }) else { return }
+        guard sessions[idx].isPinned else { return } // Not pinned
+        
+        let removedOrder = sessions[idx].pinnedOrder
+        sessions[idx].isPinned = false
+        sessions[idx].pinnedOrder = nil
+        
+        // Reorder remaining pinned items to fill the gap
+        if let removed = removedOrder {
+            for i in sessions.indices {
+                if sessions[i].isPinned, let order = sessions[i].pinnedOrder, order > removed {
+                    sessions[i].pinnedOrder = order - 1
+                }
+            }
+        }
+        persistSessions()
+    }
+    
+    /// Reorder pinned sessions by moving a session from one position to another
+    func movePinnedSession(from source: IndexSet, to destination: Int, in pinnedSessions: [ChatSession]) {
+        guard let sourceIndex = source.first else { return }
+        
+        // Create mutable copy of pinned sessions
+        var reordered = pinnedSessions
+        reordered.move(fromOffsets: source, toOffset: destination)
+        
+        // Update pinnedOrder for all pinned sessions based on new order
+        for (newOrder, session) in reordered.enumerated() {
+            if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
+                sessions[idx].pinnedOrder = newOrder
+            }
+        }
+        persistSessions()
+    }
 
     /// Create and persist an accepted session (used for client2 joining by code, or when we already have roomId)
     @discardableResult

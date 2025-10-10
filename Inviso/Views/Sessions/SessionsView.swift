@@ -96,6 +96,30 @@ struct SessionsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
+                    // Pinned Sessions (with drag-to-reorder)
+                    if !pinnedSessions.isEmpty {
+                        Section {
+                            ForEach(pinnedSessions, id: \.id) { session in
+                                sessionRow(session)
+                                    .matchedGeometryEffect(id: session.id, in: sessionNamespace)
+                            }
+                            .onMove { source, destination in
+                                chat.movePinnedSession(from: source, to: destination, in: pinnedSessions)
+                            }
+                        } header: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.accentColor)
+                                Text("Pinned")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.primary)
+                                    .textCase(nil)
+                            }
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    
                     // Pending Sessions (only shown if there are any)
                     if !pendingSessions.isEmpty {
                         Section {
@@ -319,14 +343,20 @@ struct SessionsView: View {
     
     // MARK: - Session Categorization
     
+    private var pinnedSessions: [ChatSession] {
+        chat.sessions
+            .filter { $0.isPinned }
+            .sorted { ($0.pinnedOrder ?? Int.max) < ($1.pinnedOrder ?? Int.max) }
+    }
+    
     private var pendingSessions: [ChatSession] {
         chat.sessions
-            .filter { $0.status == .pending }
+            .filter { $0.status == .pending && !$0.isPinned }
             .sorted { $0.createdAt > $1.createdAt } // Newest pending first
     }
     
     private var acceptedSessions: [ChatSession] {
-        let filtered = chat.sessions.filter { $0.status == .accepted }
+        let filtered = chat.sessions.filter { $0.status == .accepted && !$0.isPinned }
         let sorted: [ChatSession]
         
         switch contactsSortMode {
@@ -348,8 +378,8 @@ struct SessionsView: View {
     }
     
     private var activeSessions: [ChatSession] {
-        // Keep for backward compatibility, combines pending + accepted
-        let filtered = chat.sessions.filter { $0.status == .pending || $0.status == .accepted }
+        // Keep for backward compatibility, combines pending + accepted (excluding pinned)
+        let filtered = chat.sessions.filter { ($0.status == .pending || $0.status == .accepted) && !$0.isPinned }
         let sorted: [ChatSession]
         
         switch contactsSortMode {
@@ -372,7 +402,7 @@ struct SessionsView: View {
     
     private var inactiveSessions: [ChatSession] {
         chat.sessions
-            .filter { $0.status == .closed || $0.status == .expired }
+            .filter { ($0.status == .closed || $0.status == .expired) && !$0.isPinned }
             .sorted { session1, session2 in
                 // Sort by the date when they became inactive (closedAt or expiresAt)
                 let date1 = session1.status == .closed ? (session1.closedAt ?? session1.lastActivityDate) : (session1.expiresAt ?? session1.lastActivityDate)
@@ -409,6 +439,22 @@ struct SessionsView: View {
         }
         .buttonStyle(.plain)
         .disabled(chat.connectionStatus != .connected && session.status != .pending)
+        .swipeActions(edge: .leading) {
+            Button {
+                if session.isPinned {
+                    chat.unpinSession(session)
+                } else {
+                    chat.pinSession(session)
+                }
+            } label: {
+                if session.isPinned {
+                    Image(systemName: "pin.slash")
+                } else {
+                    Image(systemName: "pin")
+                }
+            }
+            .tint(session.isPinned ? .orange : .accentColor)
+        }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
                 sessionToDelete = session
@@ -417,6 +463,19 @@ struct SessionsView: View {
             }
         }
         .contextMenu {
+            Button {
+                if session.isPinned {
+                    chat.unpinSession(session)
+                } else {
+                    chat.pinSession(session)
+                }
+            } label: { 
+                Label(
+                    session.isPinned ? "Unpin" : "Pin",
+                    systemImage: session.isPinned ? "pin.slash" : "pin"
+                )
+            }
+            
             Button {
                 showRoomSettings = session
             } label: { 
@@ -446,9 +505,16 @@ struct SessionsView: View {
             }
             
             VStack(alignment: .leading, spacing: 4) {
-                Text(session.displayName)
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(session.displayName)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.primary)
+                    if session.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundColor(.accentColor)
+                    }
+                }
                 
                 HStack(spacing: 6) {
                     Text("Code: \(session.code)")
@@ -501,14 +567,23 @@ struct SessionsView: View {
         HStack(spacing: 12) {
             statusDot(for: session)
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayName)
-                    .font(.body.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text(session.displayName)
+                        .font(.body.weight(.semibold))
+                    if session.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundColor(.accentColor)
+                    }
+                }
                 subtitleView(for: session)
             }
             
             Spacer()
             
             VStack(alignment: .trailing, spacing: 4) {
+                Spacer()
+                
                 // Last activity on the right
                 Text(formatRelativeDate(session.lastActivityDate))
                     .font(.caption2)
