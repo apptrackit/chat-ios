@@ -125,10 +125,7 @@ class ChatManager: NSObject, ObservableObject {
     if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
     if isEphemeral { messages.removeAll() }
         self.roomId = roomId
-        // Update activity for the session being joined
-        if let sessionId = sessions.first(where: { $0.roomId == roomId })?.id {
-            updateSessionActivity(sessionId)
-        }
+        // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
         signaling.send(["type": "join_room", "roomId": roomId])
     }
 
