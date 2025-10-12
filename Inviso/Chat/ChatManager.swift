@@ -34,6 +34,7 @@ class ChatManager: NSObject, ObservableObject {
     private var signaling: SignalingClient
     private var apiBase: URL { URL(string: "https://\(ServerConfig.shared.host)")! }
     private let pcm = PeerConnectionManager()
+    private let apiClient = APIClient()
     
     // Encryption components
     private var keyExchangeHandler: KeyExchangeHandler?
@@ -73,6 +74,7 @@ class ChatManager: NSObject, ObservableObject {
         loadSessions()
         setupKeyExchangeObservers()
         setupAppLifecycleObservers()
+        setupPushNotificationObservers()
     }
 
     deinit {
@@ -524,28 +526,55 @@ class ChatManager: NSObject, ObservableObject {
         // Use original minutes value directly (more accurate than recalculating)
         let expiresInSeconds = originalMinutes * 60
         let client1 = session.ephemeralDeviceId // Use ephemeral ID for privacy
-        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
-        req.httpMethod = "POST"
-        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["joinid": joinid, "expiresInSeconds": expiresInSeconds, "client1": client1]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        do { _ = try await URLSession.shared.data(for: req) } catch { print("createPending error: \(error)") }
+        
+        // Get device token for push notifications
+        let deviceToken = PushNotificationManager.shared.getDeviceToken()
+        
+        // Debug logging
+        if let token = deviceToken {
+            print("[ChatManager] 📤 Creating room with device token: \(token.prefix(16))...")
+        } else {
+            print("[ChatManager] ⚠️ Creating room WITHOUT device token - push notifications will not work!")
+        }
+        
+        do {
+            // Use APIClient instead of direct URLSession for better token handling
+            try await apiClient.createRoom(
+                joinCode: joinid,
+                expiresInSeconds: expiresInSeconds,
+                clientID: client1,
+                deviceToken: deviceToken
+            )
+            
+            if deviceToken != nil {
+                print("[ChatManager] ✅ Room created with push notification support")
+            }
+        } catch {
+            print("[ChatManager] ❌ createPending error: \(error)")
+        }
     }
 
     func acceptJoinCode(_ code: String) async -> (roomId: String, ephemeralId: String)? {
         let client2 = UUID().uuidString // Generate new ephemeral ID for this session
-        var req = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/accept"))
-        req.httpMethod = "POST"
-        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": code, "client2": client2])
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return nil }
-            if http.statusCode == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let rid = json["roomid"] as? String { 
-                return (rid, client2)
+        
+        // Get device token for push notifications
+        let deviceToken = PushNotificationManager.shared.getDeviceToken()
+        
+        // Debug logging
+        if let token = deviceToken {
+            print("[ChatManager] 📤 Accepting room with device token: \(token.prefix(16))...")
+        } else {
+            print("[ChatManager] ⚠️ Accepting room WITHOUT device token - push notifications will not work!")
+        }
+        
+        // Use APIClient for better token handling
+        if let roomId = await apiClient.acceptJoinCode(code, clientID: client2, deviceToken: deviceToken) {
+            if deviceToken != nil {
+                print("[ChatManager] ✅ Room accepted with push notification support")
             }
-            if http.statusCode == 404 || http.statusCode == 409 { return nil }
-        } catch { print("acceptJoinCode error: \(error)") }
+            return (roomId, client2)
+        }
+        
         return nil
     }
 
@@ -734,6 +763,66 @@ class ChatManager: NSObject, ObservableObject {
                 }
             }
             .store(in: &appLifecycleCancellables)
+    }
+    
+    // MARK: - Push Notification Observers
+    
+    private func setupPushNotificationObservers() {
+        // Observe when user taps a push notification
+        NotificationCenter.default.publisher(for: .pushNotificationTapped)
+            .sink { [weak self] notification in
+                Task { @MainActor in
+                    guard let userInfo = notification.userInfo,
+                          let roomId = userInfo["roomId"] as? String else {
+                        print("[Push] ⚠️ Invalid notification userInfo")
+                        return
+                    }
+                    
+                    await self?.handlePushNotificationTap(roomId: roomId)
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+    }
+    
+    @MainActor
+    private func handlePushNotificationTap(roomId: String) async {
+        print("[Push] 📱 Handling notification tap for room: \(roomId.prefix(8))")
+        
+        // If we're already in this room, just bring the app to foreground
+        if self.roomId == roomId {
+            print("[Push] ℹ️ Already in room \(roomId.prefix(8))")
+            return
+        }
+        
+        // If we're in a different room, leave it first
+        if !self.roomId.isEmpty {
+            print("[Push] ⚠️ Leaving current room \(self.roomId.prefix(8)) to join \(roomId.prefix(8))")
+            leave(userInitiated: false)
+            try? await Task.sleep(nanoseconds: 500_000_000) // Brief delay for cleanup
+        }
+        
+        // Connect to signaling server if not connected
+        if connectionStatus != .connected {
+            print("[Push] 🔌 Connecting to signaling server...")
+            signaling.connect()
+            
+            // Wait for connection with timeout
+            for _ in 0..<50 { // 5 second timeout (50 * 100ms)
+                if connectionStatus == .connected {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            
+            if connectionStatus != .connected {
+                print("[Push] ❌ Failed to connect to signaling server")
+                return
+            }
+        }
+        
+        // Join the room from the push notification
+        print("[Push] ✅ Joining room \(roomId.prefix(8))")
+        joinRoom(roomId: roomId)
     }
     
     private func handleAppBecameActive() async {

@@ -12,22 +12,45 @@ final class APIClient {
 
     // MARK: - Room Management
 
-    func createRoom(joinCode: String, expiresInSeconds: Int, clientID: String) async throws {
+    func createRoom(joinCode: String, expiresInSeconds: Int, clientID: String, deviceToken: String? = nil) async throws {
         var request = URLRequest(url: apiBase.appendingPathComponent("/api/rooms"))
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let body: [String: Any] = ["joinid": joinCode, "expiresInSeconds": expiresInSeconds, "client1": clientID]
+        var body: [String: Any] = [
+            "joinid": joinCode,
+            "expiresInSeconds": expiresInSeconds,
+            "client1": clientID
+        ]
+        
+        // Add device token if available
+        if let token = deviceToken {
+            body["client1_token"] = token
+            body["platform"] = "ios"
+        }
+        
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (_, _) = try await URLSession.shared.data(for: request)
     }
 
-    func acceptJoinCode(_ code: String, clientID: String) async -> String? {
+    func acceptJoinCode(_ code: String, clientID: String, deviceToken: String? = nil) async -> String? {
         var request = URLRequest(url: apiBase.appendingPathComponent("/api/rooms/accept"))
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["joinid": code, "client2": clientID])
+        
+        var body: [String: Any] = [
+            "joinid": code,
+            "client2": clientID
+        ]
+        
+        // Add device token if available
+        if let token = deviceToken {
+            body["client2_token"] = token
+            body["platform"] = "ios"
+        }
+        
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)

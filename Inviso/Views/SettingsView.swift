@@ -50,6 +50,19 @@ struct SettingsView: View {
                         }
                     }
                 }
+                
+                NavigationLink {
+                    NotificationSettingsView()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Push Notifications")
+                            Text("Get notified when someone joins your room")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
             }
 
             securitySection
