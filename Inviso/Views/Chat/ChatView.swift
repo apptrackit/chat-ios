@@ -7,6 +7,7 @@ struct ChatView: View {
     @State private var input: String = ""
     @State private var showLeaveConfirm = false
     @State private var showConnectionCard = false
+    @State private var showRoomSettings = false
 
     var body: some View {
     ZStack(alignment: .center) {
@@ -33,13 +34,18 @@ struct ChatView: View {
                     }
                     .padding(.vertical, 12)
                 }
+                .simultaneousGesture(
+                    DragGesture().onChanged { _ in
+                        // Dismiss keyboard when user starts scrolling
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
+                )
                 .onChange(of: chat.messages.count) {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
             }
 
         }
-        .navigationTitle(chat.activeSessionDisplayName)
         .navigationBarTitleDisplayMode(.inline)
         .hideTabBar()
         .navigationBarBackButtonHidden(true)
@@ -50,6 +56,22 @@ struct ChatView: View {
             chat.chatViewDidDisappear()
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button {
+                    showRoomSettings = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(chat.activeSessionDisplayName)
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            
             ToolbarItem(placement: .navigationBarLeading) {
                 Button { showLeaveConfirm = true } label: {
                     HStack(spacing: 4) { Image(systemName: "chevron.left"); Text("Leave") }
@@ -126,6 +148,14 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You will disconnect from this room.")
+        }
+        .sheet(isPresented: $showRoomSettings) {
+            if let session = chat.activeSession {
+                NavigationView {
+                    RoomSettingsView(session: session)
+                        .environmentObject(chat)
+                }
+            }
         }
         .background(DisablePopGesture())
         .safeAreaInset(edge: .bottom) {
@@ -319,6 +349,7 @@ private struct DisablePopGesture: UIViewControllerRepresentable {
 struct ChatBubble: View {
     let message: MessageItem
     var showTime: Bool = true
+    @State private var showCopied = false
 
     var body: some View {
         HStack(alignment: .bottom) {
@@ -328,19 +359,49 @@ struct ChatBubble: View {
                     .padding(10)
                     .foregroundColor(message.isFromSelf ? .white : .primary)
                     .background(
-                        Group {
-                            if message.isFromSelf {
-                                Capsule().fill(Color.accentColor)
-                            } else {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(Color(UIColor.secondarySystemBackground))
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
+                    )
+                    .onLongPressGesture(minimumDuration: 0.3) {
+                        // Copy message instantly on long press
+                        let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                        impactMed.impactOccurred()
+                        
+                        UIPasteboard.general.string = message.text
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                            showCopied = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                showCopied = false
                             }
                         }
-                    )
+                    }
                 if showTime {
                     Text(message.time, style: .time)
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                }
+            }
+            .overlay(alignment: .top) {
+                if showCopied {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.on.doc.fill")
+                            .font(.caption2.weight(.semibold))
+                        Text("Copied")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.green)
+                    )
+                    .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+                    .offset(y: -44)
+                    .fixedSize()
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
             if !message.isFromSelf { Spacer() }

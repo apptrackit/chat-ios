@@ -92,17 +92,6 @@ struct RoomSettingsView: View {
                 .font(.title2.weight(.bold))
                 .foregroundColor(.primary)
             
-            if !session.code.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "number")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(session.code)
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-            }
-            
             // Status badge
             Text(session.status.displayText)
                 .font(.caption.weight(.semibold))
