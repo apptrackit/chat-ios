@@ -15,5 +15,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	
+	<key>NSUserNotificationUsageDescription</key>
+	<string>We need to notify you when your chat partner is waiting so you don't miss conversations.</string>
 </dict>
 </plist>
