@@ -75,6 +75,14 @@ struct SessionsView: View {
             .navigationDestination(isPresented: $goToChat) {
                 ChatView()
             }
+            .onChange(of: chat.shouldNavigateToChat) { oldValue, newValue in
+                if newValue {
+                    print("[SessionsView] 🚀 Push notification triggered - navigating to chat")
+                    goToChat = true
+                    // Reset the flag
+                    chat.shouldNavigateToChat = false
+                }
+            }
             .onReceive(ticker) { _ in
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
             }

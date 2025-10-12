@@ -26,6 +26,9 @@ class ChatManager: NSObject, ObservableObject {
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
     
+    // Push notification navigation trigger
+    @Published var shouldNavigateToChat: Bool = false
+    
     // Encryption (E2EE)
     @Published var isEncryptionReady: Bool = false // True when key exchange completes and encryption is active
     @Published var keyExchangeInProgress: Bool = false // True during key negotiation
@@ -801,6 +804,8 @@ class ChatManager: NSObject, ObservableObject {
         // If we're already in this room, just bring the app to foreground
         if self.roomId == roomId {
             print("[Push] ℹ️ Already in room \(roomId.prefix(8))")
+            // Still trigger navigation in case user is on a different screen
+            shouldNavigateToChat = true
             return
         }
         
@@ -833,6 +838,10 @@ class ChatManager: NSObject, ObservableObject {
         // Join the room from the push notification
         print("[Push] ✅ Joining room \(roomId.prefix(8))")
         joinRoom(roomId: roomId)
+        
+        // Trigger UI navigation to chat view
+        shouldNavigateToChat = true
+        print("[Push] 🚀 Triggering navigation to chat view")
     }
     
     private func handleAppBecameActive() async {
