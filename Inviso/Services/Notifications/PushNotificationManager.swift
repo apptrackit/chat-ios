@@ -186,7 +186,7 @@ class PushNotificationManager: NSObject, ObservableObject {
             return
         }
         
-        print("[Push] 📱 User tapped notification for room: \(roomId)")
+        print("[Push] 📱 User tapped notification for room: \(roomId.prefix(8))...")
         
         // Post notification for ChatManager to handle
         NotificationCenter.default.post(
@@ -194,6 +194,17 @@ class PushNotificationManager: NSObject, ObservableObject {
             object: nil,
             userInfo: ["roomId": roomId]
         )
+    }
+    
+    /// Helper function to look up room name from ChatManager sessions
+    /// This should be called from outside (e.g., AppDelegate) with access to ChatManager
+    static func getRoomName(forRoomId roomId: String, sessions: [ChatSession]) -> String? {
+        return sessions.first(where: { $0.roomId == roomId })?.name
+    }
+    
+    /// Helper function to look up session from ChatManager sessions
+    static func getSession(forRoomId roomId: String, sessions: [ChatSession]) -> ChatSession? {
+        return sessions.first(where: { $0.roomId == roomId })
     }
     
     /// Open iOS Settings app to the notification settings for this app
@@ -215,6 +226,16 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        let userInfo = notification.request.content.userInfo
+        
+        if let roomId = userInfo["roomId"] as? String {
+            // Try to get room name for better logging
+            let roomName = getRoomName(forRoomId: roomId) ?? "Unnamed Room"
+            print("[Push] 📬 Notification received (foreground): \(roomName) (roomId: \(roomId.prefix(8))...)")
+        } else {
+            print("[Push] 📬 Notification received (foreground, no roomId)")
+        }
+        
         // Show notification even when app is in foreground
         completionHandler([.banner, .sound, .badge])
     }
@@ -226,8 +247,26 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
+        
+        // Log with room name if available
+        if let roomId = userInfo["roomId"] as? String {
+            let roomName = getRoomName(forRoomId: roomId) ?? "Unnamed Room"
+            print("[Push] 🎯 User tapped notification: \(roomName) (roomId: \(roomId.prefix(8))...)")
+        }
+        
         handleNotificationTap(userInfo: userInfo)
         completionHandler()
+    }
+    
+    /// Get room name from UserDefaults (sessions storage)
+    /// This is a lightweight way to access session data without ChatManager dependency
+    private func getRoomName(forRoomId roomId: String) -> String? {
+        guard let data = UserDefaults.standard.data(forKey: "sessions"),
+              let sessions = try? JSONDecoder().decode([ChatSession].self, from: data) else {
+            return nil
+        }
+        
+        return sessions.first(where: { $0.roomId == roomId })?.name
     }
 }
 

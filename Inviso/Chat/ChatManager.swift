@@ -128,7 +128,17 @@ class ChatManager: NSObject, ObservableObject {
     if isEphemeral { messages.removeAll() }
         self.roomId = roomId
         // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
-        signaling.send(["type": "join_room", "roomId": roomId])
+        
+        // Find the session's ephemeral device ID to send to backend for push notification matching
+        let deviceId = sessions.first(where: { $0.roomId == roomId })?.ephemeralDeviceId
+        
+        if let deviceId = deviceId {
+            signaling.send(["type": "join_room", "roomId": roomId, "deviceId": deviceId])
+            print("[ChatManager] 🔌 Joining room with deviceId: \(deviceId.prefix(8))...")
+        } else {
+            signaling.send(["type": "join_room", "roomId": roomId])
+            print("[ChatManager] ⚠️ Joining room without deviceId (not found in sessions)")
+        }
     }
 
     func leave(userInitiated: Bool = false) {
