@@ -8,11 +8,37 @@
 
 /* Begin PBXBuildFile section */
 		493A515F2E783575004692B2 /* trackit icon 2.icon in Resources */ = {isa = PBXBuildFile; fileRef = 493A515E2E783575004692B2 /* trackit icon 2.icon */; };
+		4996DBC42E9C13BF00D94062 /* InvisoNotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4996DBBD2E9C13BF00D94062 /* InvisoNotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		49AE6D142E74AB0D0076150B /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 49AE6D132E74AB0D0076150B /* WebRTC */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		4996DBC22E9C13BF00D94062 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 49AE6BEF2E7488960076150B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4996DBBC2E9C13BF00D94062;
+			remoteInfo = InvisoNotificationService;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		4996DBC92E9C13BF00D94062 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4996DBC42E9C13BF00D94062 /* InvisoNotificationService.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		493A515E2E783575004692B2 /* trackit icon 2.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = "trackit icon 2.icon"; sourceTree = "<group>"; };
+		4996DBBD2E9C13BF00D94062 /* InvisoNotificationService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InvisoNotificationService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		49AE6BF72E7488960076150B /* Inviso.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inviso.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -24,9 +50,24 @@
 			);
 			target = 49AE6BF62E7488960076150B /* Inviso */;
 		};
+		4996DBC82E9C13BF00D94062 /* Exceptions for "InvisoNotificationService" folder in "InvisoNotificationService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4996DBBC2E9C13BF00D94062 /* InvisoNotificationService */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		4996DBBE2E9C13BF00D94062 /* InvisoNotificationService */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4996DBC82E9C13BF00D94062 /* Exceptions for "InvisoNotificationService" folder in "InvisoNotificationService" target */,
+			);
+			path = InvisoNotificationService;
+			sourceTree = "<group>";
+		};
 		49AE6BF92E7488960076150B /* Inviso */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -38,6 +79,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		4996DBBA2E9C13BF00D94062 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF42E7488960076150B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -54,6 +102,7 @@
 			children = (
 				493A515E2E783575004692B2 /* trackit icon 2.icon */,
 				49AE6BF92E7488960076150B /* Inviso */,
+				4996DBBE2E9C13BF00D94062 /* InvisoNotificationService */,
 				49AE6BF82E7488960076150B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -62,6 +111,7 @@
 			isa = PBXGroup;
 			children = (
 				49AE6BF72E7488960076150B /* Inviso.app */,
+				4996DBBD2E9C13BF00D94062 /* InvisoNotificationService.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -69,6 +119,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		4996DBBC2E9C13BF00D94062 /* InvisoNotificationService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4996DBC52E9C13BF00D94062 /* Build configuration list for PBXNativeTarget "InvisoNotificationService" */;
+			buildPhases = (
+				4996DBB92E9C13BF00D94062 /* Sources */,
+				4996DBBA2E9C13BF00D94062 /* Frameworks */,
+				4996DBBB2E9C13BF00D94062 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4996DBBE2E9C13BF00D94062 /* InvisoNotificationService */,
+			);
+			name = InvisoNotificationService;
+			packageProductDependencies = (
+			);
+			productName = InvisoNotificationService;
+			productReference = 4996DBBD2E9C13BF00D94062 /* InvisoNotificationService.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		49AE6BF62E7488960076150B /* Inviso */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 49AE6C022E7488970076150B /* Build configuration list for PBXNativeTarget "Inviso" */;
@@ -76,10 +148,12 @@
 				49AE6BF32E7488960076150B /* Sources */,
 				49AE6BF42E7488960076150B /* Frameworks */,
 				49AE6BF52E7488960076150B /* Resources */,
+				4996DBC92E9C13BF00D94062 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				4996DBC32E9C13BF00D94062 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				49AE6BF92E7488960076150B /* Inviso */,
@@ -102,6 +176,9 @@
 				LastSwiftUpdateCheck = 2600;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					4996DBBC2E9C13BF00D94062 = {
+						CreatedOnToolsVersion = 26.0;
+					};
 					49AE6BF62E7488960076150B = {
 						CreatedOnToolsVersion = 26.0;
 					};
@@ -125,11 +202,19 @@
 			projectRoot = "";
 			targets = (
 				49AE6BF62E7488960076150B /* Inviso */,
+				4996DBBC2E9C13BF00D94062 /* InvisoNotificationService */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		4996DBBB2E9C13BF00D94062 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF52E7488960076150B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -141,6 +226,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		4996DBB92E9C13BF00D94062 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		49AE6BF32E7488960076150B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -150,7 +242,73 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		4996DBC32E9C13BF00D94062 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4996DBBC2E9C13BF00D94062 /* InvisoNotificationService */;
+			targetProxy = 4996DBC22E9C13BF00D94062 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		4996DBC62E9C13BF00D94062 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InvisoNotificationService/InvisoNotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InvisoNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InvisoNotificationService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso.InvisoNotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4996DBC72E9C13BF00D94062 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = InvisoNotificationService/InvisoNotificationService.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = S4AJ4WBQ76;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InvisoNotificationService/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InvisoNotificationService;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso.InvisoNotificationService;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		49AE6C002E7488970076150B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -279,7 +437,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Inviso/Inviso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 30;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -297,7 +455,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.8.0;
+				MARKETING_VERSION = 1.8.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -317,7 +475,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = Inviso/Inviso.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 29;
+				CURRENT_PROJECT_VERSION = 30;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -335,7 +493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.8.0;
+				MARKETING_VERSION = 1.8.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.31b4.inviso;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -351,6 +509,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		4996DBC52E9C13BF00D94062 /* Build configuration list for PBXNativeTarget "InvisoNotificationService" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4996DBC62E9C13BF00D94062 /* Debug */,
+				4996DBC72E9C13BF00D94062 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		49AE6BF22E7488960076150B /* Build configuration list for PBXProject "Inviso" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

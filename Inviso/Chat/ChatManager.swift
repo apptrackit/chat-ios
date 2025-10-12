@@ -701,16 +701,29 @@ class ChatManager: NSObject, ObservableObject {
 
     // MARK: - Persistence
     private let storeKey = "chat.sessions.v1"
+    private let appGroupId = "group.com.31b4.inviso"
+    
+    /// Access shared UserDefaults for App Group (used by Notification Service Extension)
+    private var sharedDefaults: UserDefaults? {
+        return UserDefaults(suiteName: appGroupId)
+    }
+    
     private func persistSessions() {
         do {
             let data = try JSONEncoder().encode(sessions)
+            // Save to both standard UserDefaults (for backward compatibility) and App Group
             UserDefaults.standard.set(data, forKey: storeKey)
+            // Save to App Group so Notification Service Extension can access it
+            sharedDefaults?.set(data, forKey: storeKey)
         } catch {
             print("persistSessions error: \(error)")
         }
     }
+    
     private func loadSessions() {
-        if let data = UserDefaults.standard.data(forKey: storeKey), let arr = try? JSONDecoder().decode([ChatSession].self, from: data) {
+        // Try loading from App Group first (shared), fall back to standard UserDefaults
+        let data = sharedDefaults?.data(forKey: storeKey) ?? UserDefaults.standard.data(forKey: storeKey)
+        if let data = data, let arr = try? JSONDecoder().decode([ChatSession].self, from: data) {
             self.sessions = arr
         }
     }
@@ -816,32 +829,39 @@ class ChatManager: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000) // Brief delay for cleanup
         }
         
-        // Connect to signaling server if not connected
-        if connectionStatus != .connected {
-            print("[Push] 🔌 Connecting to signaling server...")
-            signaling.connect()
-            
-            // Wait for connection with timeout
-            for _ in 0..<50 { // 5 second timeout (50 * 100ms)
-                if connectionStatus == .connected {
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        // IMPORTANT: Force a fresh WebSocket reconnection
+        // When app comes from background, the old WebSocket connection might be stale
+        // Even if connectionStatus shows .connected, the connection could be broken
+        print("[Push] � Forcing fresh WebSocket reconnection for reliable join...")
+        signaling.disconnect()
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms to ensure clean disconnect
+        signaling.connect()
+        
+        // Wait for connection with timeout
+        print("[Push] ⏳ Waiting for WebSocket connection...")
+        for i in 0..<50 { // 5 second timeout (50 * 100ms)
+            if connectionStatus == .connected {
+                print("[Push] ✅ WebSocket connected (took \(i * 100)ms)")
+                break
             }
-            
-            if connectionStatus != .connected {
-                print("[Push] ❌ Failed to connect to signaling server")
-                return
-            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         }
         
+        if connectionStatus != .connected {
+            print("[Push] ❌ Failed to connect to signaling server after 5s timeout")
+            return
+        }
+        
+        // Extra small delay to ensure clientId is properly set
+        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+        
         // Join the room from the push notification
-        print("[Push] ✅ Joining room \(roomId.prefix(8))")
+        print("[Push] 🚀 Joining room \(roomId.prefix(8))")
         joinRoom(roomId: roomId)
         
         // Trigger UI navigation to chat view
         shouldNavigateToChat = true
-        print("[Push] 🚀 Triggering navigation to chat view")
+        print("[Push] � Triggering navigation to chat view")
     }
     
     private func handleAppBecameActive() async {
