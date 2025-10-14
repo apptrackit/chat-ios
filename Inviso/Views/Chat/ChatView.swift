@@ -127,7 +127,8 @@ struct ChatView: View {
         }
         .overlay(alignment: .top) {
             if showConnectionCard {
-                connectionCard
+                ConnectionIndicatorCard()
+                    .environmentObject(chat)
                     .padding(.top, 4)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .onTapGesture {
@@ -168,7 +169,7 @@ struct ChatView: View {
                         placeholder: canSend ? "Message" : chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",
                         onSubmit: { send() }
                     )
-                        .frame(height: 36)
+                        .frame(height: 44)
                         .disabled(!canSend)
                         .opacity(canSend ? 1 : 0.6)
                     if hasText && canSend {
@@ -176,7 +177,7 @@ struct ChatView: View {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
-                                .frame(width: 36, height: 36)
+                                .frame(width: 20, height: 30)
                         }
                         .transition(.scale.combined(with: .opacity))
                         .buttonStyle(.glass)
@@ -202,126 +203,6 @@ struct ChatView: View {
             // Pending session: just leave view; keep session waiting
         } else {
             chat.leave(userInitiated: true)
-        }
-    }
-
-    private var connectionCard: some View {
-        VStack(spacing: 10) {
-            // Connection path info or waiting status
-            if chat.isP2PConnected {
-                HStack(spacing: 10) {
-                    Image(systemName: iconForPath(chat.connectionPath))
-                        .foregroundColor(colorForPath(chat.connectionPath))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(chat.connectionPath.displayName)
-                            .font(.caption.weight(.semibold))
-                        Text(latencyHint)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Text(chat.connectionPath.shortLabel)
-                        .font(.caption2.weight(.bold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(colorForPath(chat.connectionPath).opacity(0.15)))
-                }
-            } else {
-                // Waiting for P2P connection
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Waiting for Peer")
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(.yellow)
-                        Text("Establishing P2P connection…")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    Text("WAITING")
-                        .font(.caption2.weight(.bold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.yellow.opacity(0.15)))
-                        .foregroundColor(.yellow)
-                }
-            }
-            
-            // Encryption status
-            if chat.isEncryptionReady || chat.keyExchangeInProgress {
-                Divider()
-                HStack(spacing: 10) {
-                    Image(systemName: chat.isEncryptionReady ? "lock.shield.fill" : "lock.rotation")
-                        .foregroundColor(chat.isEncryptionReady ? .green : .orange)
-                        .symbolEffect(.pulse, options: .repeating, isActive: chat.keyExchangeInProgress)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(chat.isEncryptionReady ? "End-to-End Encrypted" : "Establishing Encryption")
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(chat.isEncryptionReady ? .green : .orange)
-                        Text(chat.isEncryptionReady ? "Messages are secure" : "Exchanging keys…")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    
-                    if chat.keyExchangeInProgress {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else if chat.isEncryptionReady {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                            .font(.caption)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    chat.isEncryptionReady ? Color.green.opacity(0.3) :
-                    chat.keyExchangeInProgress ? Color.orange.opacity(0.3) :
-                    chat.isP2PConnected ? colorForPath(chat.connectionPath).opacity(0.25) :
-                    Color.yellow.opacity(0.3),
-                    lineWidth: 1
-                )
-        )
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-        .padding(.horizontal, 8)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Connection: \(chat.isP2PConnected ? chat.connectionPath.displayName : "Waiting"). Encryption: \(chat.isEncryptionReady ? "Active" : chat.keyExchangeInProgress ? "In progress" : "None")")
-    }
-
-    private func iconForPath(_ path: ChatManager.ConnectionPath) -> String {
-        switch path {
-        case .directLAN: return "wifi"
-        case .directReflexive: return "arrow.left.and.right"
-        case .relayed: return "cloud"
-        case .possiblyVPN: return "network.badge.shield.half.filled"
-        case .unknown: return "questionmark"
-        }
-    }
-    private func colorForPath(_ path: ChatManager.ConnectionPath) -> Color {
-        switch path {
-        case .directLAN: return .green
-        case .directReflexive: return .teal
-        case .relayed: return .orange
-        case .possiblyVPN: return .purple
-        case .unknown: return .gray
-        }
-    }
-    private var latencyHint: String {
-        switch chat.connectionPath {
-        case .directLAN: return "Lowest latency"
-        case .directReflexive: return "NAT optimized"
-        case .relayed: return "Relayed (higher latency)"
-        case .possiblyVPN: return "VPN may affect performance"
-        case .unknown: return "Resolving path…"
         }
     }
 }
