@@ -50,6 +50,19 @@ struct SettingsView: View {
                         }
                     }
                 }
+                
+                NavigationLink {
+                    NotificationSettingsView()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Push Notifications")
+                            Text("Get notified when someone joins your room")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
             }
 
             securitySection
@@ -81,6 +94,12 @@ struct SettingsView: View {
                     Text("Version")
                     Spacer()
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "-")
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Build")
+                    Spacer()
+                    Text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "-")
                         .foregroundColor(.secondary)
                 }
             }

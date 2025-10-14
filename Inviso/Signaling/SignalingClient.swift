@@ -71,6 +71,28 @@ final class SignalingClient {
                                 self?.delegate?.signalingConnected(clientId: clientId)
                             }
                         }
+                        // Handle encryption key exchange messages
+                        if type == "key_exchange" {
+                            print("🔍 [SignalingClient] Received key_exchange message")
+                            print("🔍 [SignalingClient] JSON keys: \(json.keys)")
+                            print("🔍 [SignalingClient] JSON: \(json)")
+                            DispatchQueue.main.async {
+                                NotificationCenter.default.post(
+                                    name: .keyExchangeReceived,
+                                    object: nil,
+                                    userInfo: ["message": json]
+                                )
+                            }
+                        } else if type == "key_exchange_complete" {
+                            print("🔍 [SignalingClient] Received key_exchange_complete message")
+                            DispatchQueue.main.async {
+                                NotificationCenter.default.post(
+                                    name: .keyExchangeCompleteReceived,
+                                    object: nil,
+                                    userInfo: ["message": json]
+                                )
+                            }
+                        }
                         DispatchQueue.main.async { [weak self] in
                             self?.delegate?.signalingMessage(json)
                         }
