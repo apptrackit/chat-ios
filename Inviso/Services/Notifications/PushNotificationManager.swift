@@ -188,11 +188,35 @@ class PushNotificationManager: NSObject, ObservableObject {
         
         print("[Push] 📱 User tapped notification for room: \(roomId.prefix(8))...")
         
-        // Post notification for ChatManager to handle
+        // Post notification for ChatManager to handle with full userInfo
         NotificationCenter.default.post(
             name: .pushNotificationTapped,
             object: nil,
-            userInfo: ["roomId": roomId]
+            userInfo: [
+                "roomId": roomId,
+                "receivedAt": Date() // Track when the notification was tapped
+            ]
+        )
+    }
+    
+    /// Called when a notification is received (foreground or background)
+    /// This allows us to track notifications even before user taps them
+    func handleNotificationReceived(userInfo: [AnyHashable: Any]) {
+        guard let roomId = userInfo["roomId"] as? String else {
+            print("[Push] ⚠️ No roomId in notification payload")
+            return
+        }
+        
+        print("[Push] 📬 Notification received for room: \(roomId.prefix(8))...")
+        
+        // Post notification for ChatManager to track this
+        NotificationCenter.default.post(
+            name: .pushNotificationReceived,
+            object: nil,
+            userInfo: [
+                "roomId": roomId,
+                "receivedAt": Date()
+            ]
         )
     }
     
@@ -232,6 +256,9 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
             // Try to get room name for better logging
             let roomName = getRoomName(forRoomId: roomId) ?? "Unnamed Room"
             print("[Push] 📬 Notification received (foreground): \(roomName) (roomId: \(roomId.prefix(8))...)")
+            
+            // Track this notification
+            handleNotificationReceived(userInfo: userInfo)
         } else {
             print("[Push] 📬 Notification received (foreground, no roomId)")
         }
@@ -274,6 +301,10 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
 
 extension Notification.Name {
     /// Posted when a push notification is tapped
-    /// UserInfo contains: ["roomId": String]
+    /// UserInfo contains: ["roomId": String, "receivedAt": Date]
     static let pushNotificationTapped = Notification.Name("pushNotificationTapped")
+    
+    /// Posted when a push notification is received (foreground or background)
+    /// UserInfo contains: ["roomId": String, "receivedAt": Date]
+    static let pushNotificationReceived = Notification.Name("pushNotificationReceived")
 }

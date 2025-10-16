@@ -34,6 +34,9 @@ class NotificationService: UNNotificationServiceExtension {
         
         NSLog("🔔 [NotificationService] Looking up room name for roomId: \(roomId)")
         
+        // IMPORTANT: Track this notification in App Group storage
+        trackNotification(roomId: roomId, receivedAt: Date())
+        
         // Look up room name from shared UserDefaults
         if let roomName = getRoomName(forRoomId: roomId) {
             NSLog("🔔 [NotificationService] Found room name: '\(roomName)'")
@@ -59,6 +62,35 @@ class NotificationService: UNNotificationServiceExtension {
     }
     
     // MARK: - Helper Functions
+    
+    /// Track notification in App Group storage so main app can sync it later
+    private func trackNotification(roomId: String, receivedAt: Date) {
+        let appGroupId = "group.com.31b4.inviso"
+        let pendingNotificationsKey = "pending_notifications"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            NSLog("🔔 [NotificationService] ❌ Failed to access App Group UserDefaults for tracking")
+            return
+        }
+        
+        // Load existing pending notifications
+        var pendingNotifications = sharedDefaults.array(forKey: pendingNotificationsKey) as? [[String: Any]] ?? []
+        
+        // Add this notification
+        let notification: [String: Any] = [
+            "id": UUID().uuidString,
+            "roomId": roomId,
+            "receivedAt": receivedAt.timeIntervalSince1970
+        ]
+        pendingNotifications.append(notification)
+        
+        // Save back
+        sharedDefaults.set(pendingNotifications, forKey: pendingNotificationsKey)
+        sharedDefaults.synchronize()
+        
+        NSLog("🔔 [NotificationService] ✅ Tracked notification for roomId: \(roomId)")
+        NSLog("🔔 [NotificationService] Total pending notifications: \(pendingNotifications.count)")
+    }
     
     /// Look up room name from shared UserDefaults (App Group)
     private func getRoomName(forRoomId roomId: String) -> String? {
@@ -120,13 +152,14 @@ struct ChatSession: Codable {
     var wasOriginalInitiator: Bool?
     var isPinned: Bool
     var pinnedOrder: Int?
+    var notifications: [SessionNotification]
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
         case id, name, code, roomId, createdAt, expiresAt, lastActivityDate
         case firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId
         case encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator
-        case isPinned, pinnedOrder
+        case isPinned, pinnedOrder, notifications
     }
     
     init(from decoder: Decoder) throws {
@@ -148,7 +181,14 @@ struct ChatSession: Codable {
         wasOriginalInitiator = try container.decodeIfPresent(Bool.self, forKey: .wasOriginalInitiator)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
+        notifications = try container.decodeIfPresent([SessionNotification].self, forKey: .notifications) ?? []
     }
+}
+
+struct SessionNotification: Codable {
+    let id: UUID
+    let receivedAt: Date
+    var viewedAt: Date?
 }
 
 enum SessionStatus: String, Codable {

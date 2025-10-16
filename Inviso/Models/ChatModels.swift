@@ -21,6 +21,24 @@ struct ChatMessage: Identifiable, Equatable {
     var isSystem: Bool = false
 }
 
+// MARK: - Push Notification Tracking
+
+struct SessionNotification: Identifiable, Codable, Equatable {
+    let id: UUID
+    let receivedAt: Date
+    var viewedAt: Date?
+    
+    init(id: UUID = UUID(), receivedAt: Date = Date(), viewedAt: Date? = nil) {
+        self.id = id
+        self.receivedAt = receivedAt
+        self.viewedAt = viewedAt
+    }
+    
+    var isUnread: Bool {
+        viewedAt == nil
+    }
+}
+
 // MARK: - Sessions (frontend-only for now)
 
 enum SessionStatus: String, Codable, Equatable {
@@ -54,6 +72,19 @@ struct ChatSession: Identifiable, Equatable, Codable {
     // Pin feature
     var isPinned: Bool = false
     var pinnedOrder: Int? // Lower numbers appear first, nil if not pinned
+    
+    // Notification tracking
+    var notifications: [SessionNotification] = []
+    
+    // Computed property for unread notification count
+    var unreadNotificationCount: Int {
+        notifications.filter { $0.isUnread }.count
+    }
+    
+    // Computed property for last notification time
+    var lastNotificationTime: Date? {
+        notifications.last?.receivedAt
+    }
 
     init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil, wasOriginalInitiator: Bool? = nil, isPinned: Bool = false, pinnedOrder: Int? = nil) {
         self.id = id
@@ -77,7 +108,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder, notifications
     }
     
     init(from decoder: Decoder) throws {
@@ -103,6 +134,8 @@ struct ChatSession: Identifiable, Equatable, Codable {
         // Pin feature (default to false/nil for backward compatibility)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
+        // Notification tracking (default to empty array for backward compatibility)
+        notifications = try container.decodeIfPresent([SessionNotification].self, forKey: .notifications) ?? []
     }
 
     var displayName: String {

@@ -11,6 +11,7 @@ import WebRTC
 import Combine
 import CryptoKit
 import UIKit
+import UserNotifications
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
@@ -28,6 +29,7 @@ class ChatManager: NSObject, ObservableObject {
     
     // Push notification navigation trigger
     @Published var shouldNavigateToChat: Bool = false
+    @Published var shouldNavigateToSessions: Bool = false
     
     // Encryption (E2EE)
     @Published var isEncryptionReady: Bool = false // True when key exchange completes and encryption is active
@@ -78,6 +80,15 @@ class ChatManager: NSObject, ObservableObject {
         setupKeyExchangeObservers()
         setupAppLifecycleObservers()
         setupPushNotificationObservers()
+        
+        // Sync pending notifications from Notification Service Extension
+        syncPendingNotifications()
+        
+        // Clean up old notifications on init
+        clearOldNotifications()
+        
+        // Clear notification center and badges when app opens
+        clearNotificationCenterAndBadge()
     }
 
     deinit {
@@ -509,6 +520,153 @@ class ChatManager: NSObject, ObservableObject {
         }
         persistSessions()
     }
+    
+    // MARK: - Notification Management
+    
+    /// Sync pending notifications from Notification Service Extension
+    /// This ensures notifications are tracked even when app wasn't open
+    func syncPendingNotifications() {
+        let appGroupId = "group.com.31b4.inviso"
+        let pendingNotificationsKey = "pending_notifications"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            print("[ChatManager] ❌ Failed to access App Group UserDefaults")
+            return
+        }
+        
+        // Load pending notifications
+        guard let pendingNotifications = sharedDefaults.array(forKey: pendingNotificationsKey) as? [[String: Any]],
+              !pendingNotifications.isEmpty else {
+            print("[ChatManager] ℹ️ No pending notifications to sync")
+            return
+        }
+        
+        print("[ChatManager] 📥 Syncing \(pendingNotifications.count) pending notifications...")
+        
+        var syncedCount = 0
+        
+        for notificationDict in pendingNotifications {
+            guard let roomId = notificationDict["roomId"] as? String,
+                  let timestamp = notificationDict["receivedAt"] as? TimeInterval else {
+                continue
+            }
+            
+            let receivedAt = Date(timeIntervalSince1970: timestamp)
+            
+            // Find the session for this roomId
+            guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+                print("[ChatManager] ⚠️ No session found for roomId: \(roomId.prefix(8))")
+                continue
+            }
+            
+            // Check if we already have this notification (avoid duplicates)
+            let alreadyExists = sessions[sessionIndex].notifications.contains { notification in
+                abs(notification.receivedAt.timeIntervalSince(receivedAt)) < 5 // Within 5 seconds
+            }
+            
+            if !alreadyExists {
+                let notification = SessionNotification(receivedAt: receivedAt)
+                sessions[sessionIndex].notifications.append(notification)
+                syncedCount += 1
+                print("[ChatManager] ✅ Synced notification for: \(sessions[sessionIndex].displayName)")
+            }
+        }
+        
+        if syncedCount > 0 {
+            persistSessions()
+            print("[ChatManager] 📥 Synced \(syncedCount) new notifications")
+        }
+        
+        // Clear pending notifications from App Group storage
+        sharedDefaults.removeObject(forKey: pendingNotificationsKey)
+        sharedDefaults.synchronize()
+        print("[ChatManager] 🗑️ Cleared pending notifications from App Group")
+    }
+    
+    /// Clear iOS notification center and reset badge to 0
+    /// But keep in-app notification history
+    func clearNotificationCenterAndBadge() {
+        Task {
+            // Remove all delivered notifications from notification center
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            
+            // Reset app badge to 0
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(0)
+                print("[ChatManager] 🔴 Cleared notification center and reset badge to 0")
+            } catch {
+                print("[ChatManager] ❌ Failed to reset badge: \(error)")
+            }
+        }
+    }
+    
+    /// Mark all notifications for a session as viewed
+    func markSessionNotificationsAsViewed(sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        
+        let now = Date()
+        var hasChanges = false
+        
+        for i in sessions[idx].notifications.indices {
+            if sessions[idx].notifications[i].viewedAt == nil {
+                sessions[idx].notifications[i].viewedAt = now
+                hasChanges = true
+            }
+        }
+        
+        if hasChanges {
+            print("[ChatManager] 📖 Marked \(sessions[idx].notifications.count) notifications as viewed for session: \(sessions[idx].displayName)")
+            persistSessions()
+            // No need to update badge count here - it's cleared when app opens
+        }
+    }
+    
+    /// Clear old notifications (older than 7 days)
+    func clearOldNotifications() {
+        let sevenDaysAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        var hasChanges = false
+        
+        for i in sessions.indices {
+            let originalCount = sessions[i].notifications.count
+            sessions[i].notifications.removeAll { $0.receivedAt < sevenDaysAgo }
+            if sessions[i].notifications.count != originalCount {
+                hasChanges = true
+            }
+        }
+        
+        if hasChanges {
+            print("[ChatManager] 🗑️ Cleared old notifications (older than 7 days)")
+            persistSessions()
+            // No need to update badge - it's cleared when app opens
+        }
+    }
+    
+    /// Update iOS badge count based on unread notifications
+    /// NOTE: This is only used internally - badge is cleared when app opens
+    private func updateBadgeCount() {
+        let totalUnread = sessions.reduce(0) { $0 + $1.unreadNotificationCount }
+        
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(totalUnread)
+                print("[ChatManager] 🔴 Updated badge count to: \(totalUnread)")
+            } catch {
+                print("[ChatManager] ❌ Failed to update badge count: \(error)")
+            }
+        }
+    }
+    
+    /// Clear all notifications for a specific session
+    func clearSessionNotifications(sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        
+        if !sessions[idx].notifications.isEmpty {
+            sessions[idx].notifications.removeAll()
+            print("[ChatManager] 🗑️ Cleared all notifications for session: \(sessions[idx].displayName)")
+            persistSessions()
+            // No need to update badge - it's cleared when app opens
+        }
+    }
 
     /// Create and persist an accepted session (used for client2 joining by code, or when we already have roomId)
     @discardableResult
@@ -799,19 +957,156 @@ class ChatManager: NSObject, ObservableObject {
             .sink { [weak self] notification in
                 Task { @MainActor in
                     guard let userInfo = notification.userInfo,
-                          let roomId = userInfo["roomId"] as? String else {
+                          let roomId = userInfo["roomId"] as? String,
+                          let receivedAt = userInfo["receivedAt"] as? Date else {
                         print("[Push] ⚠️ Invalid notification userInfo")
                         return
                     }
                     
-                    await self?.handlePushNotificationTap(roomId: roomId)
+                    await self?.handlePushNotificationTap(roomId: roomId, receivedAt: receivedAt)
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+        
+        // Observe when a notification is received (to track it)
+        NotificationCenter.default.publisher(for: .pushNotificationReceived)
+            .sink { [weak self] notification in
+                Task { @MainActor in
+                    guard let userInfo = notification.userInfo,
+                          let roomId = userInfo["roomId"] as? String,
+                          let receivedAt = userInfo["receivedAt"] as? Date else {
+                        print("[Push] ⚠️ Invalid notification userInfo")
+                        return
+                    }
+                    
+                    await self?.handlePushNotificationReceived(roomId: roomId, receivedAt: receivedAt)
                 }
             }
             .store(in: &appLifecycleCancellables)
     }
     
     @MainActor
-    private func handlePushNotificationTap(roomId: String) async {
+    private func handlePushNotificationReceived(roomId: String, receivedAt: Date) async {
+        print("[Push] 📬 Tracking received notification for room: \(roomId.prefix(8))")
+        
+        // Find the session for this roomId
+        guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+            print("[Push] ⚠️ No session found for room: \(roomId.prefix(8))")
+            return
+        }
+        
+        // Add notification to the session
+        let notification = SessionNotification(receivedAt: receivedAt)
+        sessions[sessionIndex].notifications.append(notification)
+        
+        // Persist the change
+        persistSessions()
+        
+        print("[Push] ✅ Tracked notification for session: \(sessions[sessionIndex].displayName)")
+    }
+    
+    @MainActor
+    private func handlePushNotificationTap(roomId: String, receivedAt: Date) async {
+        print("[Push] 📱 Handling notification tap for room: \(roomId.prefix(8))")
+        
+        // Find the session for this roomId
+        guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+            print("[Push] ⚠️ No session found for room: \(roomId.prefix(8))")
+            return
+        }
+        
+        let session = sessions[sessionIndex]
+        
+        // Add this notification to history if not already tracked
+        let alreadyTracked = session.notifications.contains { notification in
+            // Check if we already have a notification within 5 seconds of this one
+            abs(notification.receivedAt.timeIntervalSince(receivedAt)) < 5
+        }
+        
+        if !alreadyTracked {
+            let notification = SessionNotification(receivedAt: receivedAt)
+            sessions[sessionIndex].notifications.append(notification)
+            persistSessions()
+        }
+        
+        // DECISION LOGIC: Where to navigate?
+        // If we're currently IN this room -> go to ChatView
+        // If we've LEFT this room -> go to SessionsView to show notification history
+        
+        let isCurrentlyInRoom = self.roomId == roomId
+        let hasLeftRoom = !isCurrentlyInRoom && session.status != .pending
+        
+        if isCurrentlyInRoom {
+            // Already in room, just bring app to foreground and show chat
+            print("[Push] ℹ️ Already in room \(roomId.prefix(8)), navigating to chat")
+            shouldNavigateToChat = true
+            
+            // Mark notifications as viewed
+            markSessionNotificationsAsViewed(sessionId: session.id)
+        } else if hasLeftRoom || session.status == .closed {
+            // User has left the room, navigate to sessions view instead
+            print("[Push] 📋 User has left room, navigating to sessions view")
+            
+            // Set active session so it's highlighted
+            activeSessionId = session.id
+            
+            // Navigate to sessions view
+            shouldNavigateToSessions = true
+            
+            // Don't mark as viewed - user will see the notification history in SessionsView
+        } else {
+            // Standard flow: join the room
+            print("[Push] 🚀 Joining room from push notification")
+            
+            // If we're in a different room, leave it first
+            if !self.roomId.isEmpty {
+                print("[Push] ⚠️ Leaving current room \(self.roomId.prefix(8)) to join \(roomId.prefix(8))")
+                leave(userInitiated: false)
+                try? await Task.sleep(nanoseconds: 500_000_000) // Brief delay for cleanup
+            }
+            
+            // IMPORTANT: Force a fresh WebSocket reconnection
+            print("[Push] 🔄 Forcing fresh WebSocket reconnection for reliable join...")
+            signaling.disconnect()
+            try? await Task.sleep(nanoseconds: 200_000_000) // 200ms to ensure clean disconnect
+            signaling.connect()
+            
+            // Wait for connection with timeout
+            print("[Push] ⏳ Waiting for WebSocket connection...")
+            for i in 0..<50 { // 5 second timeout (50 * 100ms)
+                if connectionStatus == .connected {
+                    print("[Push] ✅ WebSocket connected (took \(i * 100)ms)")
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            }
+            
+            if connectionStatus != .connected {
+                print("[Push] ❌ Failed to connect to signaling server after 5s timeout")
+                return
+            }
+            
+            // Extra small delay to ensure clientId is properly set
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            
+            // Set active session
+            activeSessionId = session.id
+            
+            // Join the room from the push notification
+            print("[Push] 🚀 Joining room \(roomId.prefix(8))")
+            joinRoom(roomId: roomId)
+            
+            // Trigger UI navigation to chat view
+            shouldNavigateToChat = true
+            print("[Push] 🎯 Triggering navigation to chat view")
+            
+            // Mark notifications as viewed since we're joining
+            markSessionNotificationsAsViewed(sessionId: session.id)
+        }
+    }
+    
+    @MainActor
+    private func handlePushNotificationTap_OLD(roomId: String) async {
         print("[Push] 📱 Handling notification tap for room: \(roomId.prefix(8))")
         
         // If we're already in this room, just bring the app to foreground
@@ -868,6 +1163,12 @@ class ChatManager: NSObject, ObservableObject {
         print("📱 App became active")
         print("🔍 State check: roomId=\(roomId.isEmpty ? "empty" : String(roomId.prefix(8))), isP2PConnected=\(isP2PConnected), hadP2POnce=\(hadP2POnce)")
         print("🔍 wasInRoomBeforeDisconnect=\(wasInRoomBeforeDisconnect ?? "nil")")
+        
+        // Sync pending notifications from Notification Service Extension
+        syncPendingNotifications()
+        
+        // Clear notification center and reset badge
+        clearNotificationCenterAndBadge()
         
         // Check if we're in a room but P2P is not connected, and we had P2P before
         // This covers the case where connection dropped while phone was locked/backgrounded
