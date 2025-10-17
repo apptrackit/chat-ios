@@ -87,8 +87,8 @@ class ChatManager: NSObject, ObservableObject {
         // Clean up old notifications on init
         clearOldNotifications()
         
-        // Clear notification center and badges when app opens
-        clearNotificationCenterAndBadge()
+        // Clear notification center (cards) but keep badge
+        clearNotificationCenter()
     }
 
     deinit {
@@ -583,21 +583,11 @@ class ChatManager: NSObject, ObservableObject {
         print("[ChatManager] 🗑️ Cleared pending notifications from App Group")
     }
     
-    /// Clear iOS notification center and reset badge to 0
-    /// But keep in-app notification history
-    func clearNotificationCenterAndBadge() {
-        Task {
-            // Remove all delivered notifications from notification center
-            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-            
-            // Reset app badge to 0
-            do {
-                try await UNUserNotificationCenter.current().setBadgeCount(0)
-                print("[ChatManager] 🔴 Cleared notification center and reset badge to 0")
-            } catch {
-                print("[ChatManager] ❌ Failed to reset badge: \(error)")
-            }
-        }
+    /// Clear iOS notification center cards only (does not affect badge count)
+    func clearNotificationCenter() {
+        // Remove all delivered notifications from notification center
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        print("[ChatManager] � Cleared notification center cards (badge unchanged)")
     }
     
     /// Mark all notifications for a session as viewed
@@ -617,7 +607,7 @@ class ChatManager: NSObject, ObservableObject {
         if hasChanges {
             print("[ChatManager] 📖 Marked \(sessions[idx].notifications.count) notifications as viewed for session: \(sessions[idx].displayName)")
             persistSessions()
-            // No need to update badge count here - it's cleared when app opens
+            updateBadgeCount()
         }
     }
     
@@ -664,7 +654,7 @@ class ChatManager: NSObject, ObservableObject {
             sessions[idx].notifications.removeAll()
             print("[ChatManager] 🗑️ Cleared all notifications for session: \(sessions[idx].displayName)")
             persistSessions()
-            // No need to update badge - it's cleared when app opens
+            updateBadgeCount()
         }
     }
 
@@ -1002,6 +992,9 @@ class ChatManager: NSObject, ObservableObject {
         // Persist the change
         persistSessions()
         
+        // Update badge count
+        updateBadgeCount()
+        
         print("[Push] ✅ Tracked notification for session: \(sessions[sessionIndex].displayName)")
     }
     
@@ -1167,8 +1160,11 @@ class ChatManager: NSObject, ObservableObject {
         // Sync pending notifications from Notification Service Extension
         syncPendingNotifications()
         
-        // Clear notification center and reset badge
-        clearNotificationCenterAndBadge()
+        // Update badge count based on total unread notifications
+        updateBadgeCount()
+        
+        // Clear notification center cards (but keep badge showing unread count)
+        clearNotificationCenter()
         
         // Check if we're in a room but P2P is not connected, and we had P2P before
         // This covers the case where connection dropped while phone was locked/backgrounded
