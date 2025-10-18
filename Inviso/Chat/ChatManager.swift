@@ -160,6 +160,13 @@ class ChatManager: NSObject, ObservableObject {
             suppressReconnectOnce = true
             // User explicitly left - clear auto-rejoin state
             wasInRoomBeforeDisconnect = nil
+            
+            // End Live Activity if user manually leaves
+            Task {
+                if #available(iOS 16.2, *) {
+                    await LiveActivityManager.shared.endActivityForRoom(roomId)
+                }
+            }
         }
         guard !roomId.isEmpty else { return }
     messages.removeAll()
@@ -1146,6 +1153,16 @@ class ChatManager: NSObject, ObservableObject {
         // Clear notification center cards (but keep badge showing unread count)
         clearNotificationCenter()
         
+        // Check for Live Activity updates from Notification Service Extension
+        if #available(iOS 16.2, *) {
+            await checkForLiveActivityUpdates()
+        }
+        
+        // Dismiss Live Activity when app becomes active (after checking for updates)
+        if #available(iOS 16.2, *) {
+            await LiveActivityManager.shared.endActivity()
+        }
+        
         // Check if we're in a room but P2P is not connected, and we had P2P before
         // This covers the case where connection dropped while phone was locked/backgrounded
         if !roomId.isEmpty && !isP2PConnected && hadP2POnce {
@@ -1194,12 +1211,59 @@ class ChatManager: NSObject, ObservableObject {
     
     private func handleAppWillResignActive() {
         print("📱 App will resign active")
-        // Save current room if we're in one and P2P was established
-        if !roomId.isEmpty && hadP2POnce {
-            wasInRoomBeforeDisconnect = roomId
-            print("💾 App will resign active - saved room: \(roomId.prefix(8))")
-        } else {
-            print("ℹ️ Not saving room (isEmpty=\(roomId.isEmpty), hadP2P=\(hadP2POnce))")
+        
+        // If we're in a room, we need to disconnect so the server knows we're gone
+        // This ensures the other peer gets a push notification when they join
+        guard !roomId.isEmpty else {
+            print("ℹ️ No room to disconnect from")
+            return
+        }
+        
+        let currentRoomId = roomId
+        let hadP2P = hadP2POnce
+        let peerPresent = remotePeerPresent
+        let roomName = sessions.first(where: { $0.roomId == currentRoomId })?.displayName ?? "Room"
+        
+        // Save room for auto-rejoin when app comes back
+        wasInRoomBeforeDisconnect = currentRoomId
+        print("💾 App will resign active - saved room: \(currentRoomId.prefix(8))")
+        
+        Task { @MainActor in
+            // Start Live Activity BEFORE disconnecting (if waiting alone)
+            if #available(iOS 16.2, *), !peerPresent && !hadP2P {
+                print("[LiveActivity] 🚀 Starting Live Activity for room: \(currentRoomId.prefix(8))... (\(roomName))")
+                await LiveActivityManager.shared.startActivity(roomId: currentRoomId, roomName: roomName)
+            }
+            
+            // Disconnect from the room so server knows we left
+            print("🔌 Disconnecting from room \(currentRoomId.prefix(8)) on background")
+            self.leave(userInitiated: false)
+        }
+    }
+    
+    /// Check for Live Activity updates from Notification Service Extension
+    @available(iOS 16.2, *)
+    private func checkForLiveActivityUpdates() async {
+        let appGroupId = "group.com.31b4.inviso"
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId),
+              let currentActivityRoomId = LiveActivityManager.shared.getCurrentActivityRoomId() else {
+            return
+        }
+        
+        let updateKey = "live_activity_update_\(currentActivityRoomId)"
+        
+        if let update = sharedDefaults.dictionary(forKey: updateKey),
+           let status = update["status"] as? String,
+           status == "connected" {
+            
+            print("[LiveActivity] 📬 Detected 'connected' update for room: \(currentActivityRoomId.prefix(8))...")
+            
+            // Update Live Activity to connected state
+            await LiveActivityManager.shared.updateActivityToConnected(roomId: currentActivityRoomId)
+            
+            // Clear the update flag
+            sharedDefaults.removeObject(forKey: updateKey)
+            sharedDefaults.synchronize()
         }
     }
     

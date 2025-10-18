@@ -6,6 +6,7 @@
 //
 
 import UserNotifications
+import ActivityKit
 
 class NotificationService: UNNotificationServiceExtension {
     
@@ -30,6 +31,36 @@ class NotificationService: UNNotificationServiceExtension {
             NSLog("🔔 [NotificationService] No roomId in payload, showing original notification")
             contentHandler(bestAttemptContent)
             return
+        }
+        
+        NSLog("🔔 [NotificationService] Notification for roomId: \(roomId)")
+        
+        // CHECK: Is there an active Live Activity for this room?
+        if #available(iOS 16.2, *), let (_, liveActivityRoomId) = getActiveLiveActivity() {
+            if liveActivityRoomId == roomId {
+                NSLog("🔔 [NotificationService] ✅ Live Activity active for this room - updating to CONNECTED and suppressing APN")
+                
+                // Update Live Activity to "connected" state
+                updateLiveActivityToConnected(roomId: roomId)
+                
+                // Track notification (for app sync)
+                trackNotification(roomId: roomId, receivedAt: Date())
+                
+                // SUPPRESS APN - don't show notification card
+                // Deliver empty notification (user will see Live Activity update instead)
+                bestAttemptContent.title = ""
+                bestAttemptContent.body = ""
+                bestAttemptContent.sound = nil
+                
+                // Still update badge count
+                let totalBadgeCount = calculateTotalBadgeCount()
+                bestAttemptContent.badge = NSNumber(value: totalBadgeCount)
+                
+                contentHandler(bestAttemptContent)
+                return
+            } else {
+                NSLog("🔔 [NotificationService] Live Activity exists but for different room (\(liveActivityRoomId.prefix(8))...) - showing normal APN")
+            }
         }
         
         NSLog("🔔 [NotificationService] Looking up room name for roomId: \(roomId)")
@@ -230,4 +261,106 @@ enum SessionStatus: String, Codable {
     case closed
     case expired
 }
+
+// MARK: - Live Activity Support
+
+extension NotificationService {
+    
+    /// Get active Live Activity info from App Group
+    @available(iOS 16.2, *)
+    private func getActiveLiveActivity() -> (activityId: String, roomId: String)? {
+        let appGroupId = "group.com.31b4.inviso"
+        let activityIdKey = "live_activity_id"
+        let activityRoomIdKey = "live_activity_room_id"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId),
+              let activityId = sharedDefaults.string(forKey: activityIdKey),
+              let roomId = sharedDefaults.string(forKey: activityRoomIdKey) else {
+            NSLog("🔔 [NotificationService] No active Live Activity found in App Group")
+            return nil
+        }
+        
+        NSLog("🔔 [NotificationService] Found active Live Activity: activityId=\(activityId.prefix(8))..., roomId=\(roomId.prefix(8))...")
+        return (activityId, roomId)
+    }
+    
+    /// Update Live Activity to "connected" state
+    /// This signals to the main app that the Live Activity needs updating
+    @available(iOS 16.2, *)
+    private func updateLiveActivityToConnected(roomId: String) {
+        let appGroupId = "group.com.31b4.inviso"
+        let updateKey = "live_activity_update_\(roomId)"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            NSLog("🔔 [NotificationService] ❌ Failed to access App Group for Live Activity update")
+            return
+        }
+        
+        // Signal to main app to update Live Activity (fallback)
+        let update: [String: Any] = [
+            "status": "connected",
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        sharedDefaults.set(update, forKey: updateKey)
+        sharedDefaults.synchronize()
+        
+        NSLog("🔔 [NotificationService] ✅ Signaled Live Activity update for room: \(roomId.prefix(8))...")
+        
+        // Attempt to update the Live Activity immediately so user sees status change without opening the app
+        if #available(iOS 16.2, *) {
+            updateLiveActivityDirectly(roomId: roomId)
+        }
+    }
+}
+
+#if canImport(ActivityKit)
+// MARK: - ActivityKit Helpers
+
+@available(iOS 16.2, *)
+extension NotificationService {
+    private func updateLiveActivityDirectly(roomId: String) {
+        Task {
+            let activities = Activity<InvisoLiveActivityAttributes>.activities
+            guard let activity = activities.first(where: { $0.attributes.roomId == roomId }) else {
+                NSLog("🔔 [NotificationService] ⚠️ No matching Live Activity instance found for room: \(roomId.prefix(8))...")
+                return
+            }
+            
+            let currentState = activity.content.state
+            let updatedState = InvisoLiveActivityAttributes.ContentState(
+                roomName: currentState.roomName,
+                status: .connected,
+                startTime: currentState.startTime
+            )
+            
+            do {
+                try await activity.update(.init(state: updatedState, staleDate: nil))
+                NSLog("🔔 [NotificationService] ✅ Live Activity updated to CONNECTED for room: \(roomId.prefix(8))...")
+                
+                // Auto-dismiss after short delay to match main app behavior
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await activity.end(dismissalPolicy: .immediate)
+            } catch {
+                NSLog("🔔 [NotificationService] ❌ Failed to update Live Activity: \(String(describing: error))")
+            }
+        }
+    }
+}
+
+// Duplicate the Activity Attributes here so the extension can compile without a shared module
+@available(iOS 16.1, *)
+struct InvisoLiveActivityAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        var roomName: String
+        var status: WaitingStatus
+        var startTime: Date
+    }
+    var roomId: String
+}
+
+enum WaitingStatus: String, Codable, Hashable {
+    case waiting
+    case connected
+}
+#endif
 
