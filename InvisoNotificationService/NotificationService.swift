@@ -37,6 +37,11 @@ class NotificationService: UNNotificationServiceExtension {
         // IMPORTANT: Track this notification in App Group storage
         trackNotification(roomId: roomId, receivedAt: Date())
         
+        // Calculate and set accumulated badge count
+        let totalBadgeCount = calculateTotalBadgeCount()
+        bestAttemptContent.badge = NSNumber(value: totalBadgeCount)
+        NSLog("🔔 [NotificationService] Set badge to: \(totalBadgeCount)")
+        
         // Look up room name from shared UserDefaults
         if let roomName = getRoomName(forRoomId: roomId) {
             NSLog("🔔 [NotificationService] Found room name: '\(roomName)'")
@@ -90,6 +95,34 @@ class NotificationService: UNNotificationServiceExtension {
         
         NSLog("🔔 [NotificationService] ✅ Tracked notification for roomId: \(roomId)")
         NSLog("🔔 [NotificationService] Total pending notifications: \(pendingNotifications.count)")
+    }
+    
+    /// Calculate total badge count from App Group storage
+    /// This counts all pending notifications that haven't been synced yet
+    /// PLUS the current iOS badge count (so it continues accumulating)
+    private func calculateTotalBadgeCount() -> Int {
+        let appGroupId = "group.com.31b4.inviso"
+        let pendingNotificationsKey = "pending_notifications"
+        let currentBadgeKey = "current_badge_count"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            NSLog("🔔 [NotificationService] ❌ Failed to access App Group for badge count")
+            return 1 // Fallback to 1
+        }
+        
+        // Get current badge count (set by main app when it last updated)
+        let currentBadge = sharedDefaults.integer(forKey: currentBadgeKey)
+        
+        // Get pending notifications count (notifications received while app was closed)
+        let pendingNotifications = sharedDefaults.array(forKey: pendingNotificationsKey) as? [[String: Any]] ?? []
+        let pendingCount = pendingNotifications.count
+        
+        // New badge = current badge (when app closed) + pending count
+        // The pending count already includes this notification (we tracked it before calling this)
+        let newBadge = currentBadge + pendingCount
+        
+        NSLog("🔔 [NotificationService] Current badge: \(currentBadge), Pending: \(pendingCount), New badge: \(newBadge)")
+        return max(newBadge, 1) // Ensure at least 1
     }
     
     /// Look up room name from shared UserDefaults (App Group)

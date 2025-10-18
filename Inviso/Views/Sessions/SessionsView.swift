@@ -461,6 +461,7 @@ struct SessionsView: View {
         .buttonStyle(.plain)
         .disabled(chat.connectionStatus != .connected && session.status != .pending)
         .swipeActions(edge: .leading) {
+            // Pin/Unpin action
             Button {
                 if session.isPinned {
                     chat.unpinSession(session)
@@ -475,6 +476,16 @@ struct SessionsView: View {
                 }
             }
             .tint(session.isPinned ? .orange : .accentColor)
+            
+            // Mark as Seen (only show if there are unread notifications)
+            if session.unreadNotificationCount > 0 {
+                Button {
+                    chat.markSessionNotificationsAsViewed(sessionId: session.id)
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .tint(.green)
+            }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
@@ -484,32 +495,11 @@ struct SessionsView: View {
             }
         }
         .contextMenu {
-            Button {
-                if session.isPinned {
-                    chat.unpinSession(session)
-                } else {
-                    chat.pinSession(session)
-                }
-            } label: { 
-                Label(
-                    session.isPinned ? "Unpin" : "Pin",
-                    systemImage: session.isPinned ? "pin.slash" : "pin"
-                )
-            }
-            
             if session.unreadNotificationCount > 0 {
                 Button {
                     chat.markSessionNotificationsAsViewed(sessionId: session.id)
                 } label: {
-                    Label("Mark as Read", systemImage: "checkmark.circle")
-                }
-            }
-            
-            if !session.notifications.isEmpty {
-                Button {
-                    chat.clearSessionNotifications(sessionId: session.id)
-                } label: {
-                    Label("Clear Notifications", systemImage: "bell.slash")
+                    Label("Mark as Seen", systemImage: "checkmark.circle")
                 }
             }
             

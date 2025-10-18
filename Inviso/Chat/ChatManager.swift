@@ -506,7 +506,7 @@ class ChatManager: NSObject, ObservableObject {
     
     /// Reorder pinned sessions by moving a session from one position to another
     func movePinnedSession(from source: IndexSet, to destination: Int, in pinnedSessions: [ChatSession]) {
-        guard let sourceIndex = source.first else { return }
+        guard !source.isEmpty else { return }
         
         // Create mutable copy of pinned sessions
         var reordered = pinnedSessions
@@ -590,6 +590,46 @@ class ChatManager: NSObject, ObservableObject {
         print("[ChatManager] � Cleared notification center cards (badge unchanged)")
     }
     
+    /// Reset server-side badge counts when app opens
+    private func resetServerBadgeCounts() async {
+        // Use ephemeral device ID from any active session
+        // Server will reset badges for all rooms associated with this device
+        guard let deviceId = sessions.first?.ephemeralDeviceId else {
+            print("[ChatManager] ⚠️ No active sessions to reset badges for")
+            return
+        }
+        
+        await apiClient.resetBadgeCount(deviceId: deviceId)
+    }
+    
+    /// Sync server-side badge to match local unread count
+    private func syncServerBadgeCount() async {
+        guard let session = sessions.first, let roomId = session.roomId else {
+            print("[ChatManager] ⚠️ No active session to sync badge for")
+            return
+        }
+        
+        // Calculate total unread count
+        let totalUnread = sessions.reduce(0) { $0 + $1.unreadNotificationCount }
+        
+        // For now, we reset server badges when local count is 0
+        // This prevents accumulation issues
+        if totalUnread == 0 {
+            await apiClient.resetBadgeCount(deviceId: session.ephemeralDeviceId)
+            print("[ChatManager] 🔄 Reset server badge (local unread: 0)")
+        } else {
+            print("[ChatManager] 🔄 Server badge will continue from current (local unread: \(totalUnread))")
+        }
+    }
+    
+    /// Reset server-side badge for a specific room
+    private func resetServerBadgeForRoom(roomId: String, deviceId: String) async {
+        // Call API to reset badge for specific room
+        // Note: Current API resets all badges, but we can add a room-specific endpoint later
+        // For now, we just update local state and the next notification will sync properly
+        print("[ChatManager] 🔄 Would reset server badge for room: \(roomId.prefix(8))")
+    }
+    
     /// Mark all notifications for a session as viewed
     func markSessionNotificationsAsViewed(sessionId: UUID) {
         guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
@@ -632,9 +672,20 @@ class ChatManager: NSObject, ObservableObject {
     }
     
     /// Update iOS badge count based on unread notifications
+    /// Update iOS badge count to match total unread notifications
+    /// Also saves current badge to App Group so Notification Service Extension can continue from there
     /// NOTE: This is only used internally - badge is cleared when app opens
     private func updateBadgeCount() {
         let totalUnread = sessions.reduce(0) { $0 + $1.unreadNotificationCount }
+        
+        // Save current badge count to App Group for Notification Service Extension
+        let appGroupId = "group.com.31b4.inviso"
+        let currentBadgeKey = "current_badge_count"
+        if let sharedDefaults = UserDefaults(suiteName: appGroupId) {
+            sharedDefaults.set(totalUnread, forKey: currentBadgeKey)
+            sharedDefaults.synchronize()
+            print("[ChatManager] 💾 Saved badge count to App Group: \(totalUnread)")
+        }
         
         Task {
             do {
@@ -1000,7 +1051,7 @@ class ChatManager: NSObject, ObservableObject {
     
     @MainActor
     private func handlePushNotificationTap(roomId: String, receivedAt: Date) async {
-        print("[Push] 📱 Handling notification tap for room: \(roomId.prefix(8))")
+        print("[Push] 📱 Notification tapped for room: \(roomId.prefix(8)) - just opening app")
         
         // Find the session for this roomId
         guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
@@ -1022,80 +1073,9 @@ class ChatManager: NSObject, ObservableObject {
             persistSessions()
         }
         
-        // DECISION LOGIC: Where to navigate?
-        // If we're currently IN this room -> go to ChatView
-        // If we've LEFT this room -> go to SessionsView to show notification history
-        
-        let isCurrentlyInRoom = self.roomId == roomId
-        let hasLeftRoom = !isCurrentlyInRoom && session.status != .pending
-        
-        if isCurrentlyInRoom {
-            // Already in room, just bring app to foreground and show chat
-            print("[Push] ℹ️ Already in room \(roomId.prefix(8)), navigating to chat")
-            shouldNavigateToChat = true
-            
-            // Mark notifications as viewed
-            markSessionNotificationsAsViewed(sessionId: session.id)
-        } else if hasLeftRoom || session.status == .closed {
-            // User has left the room, navigate to sessions view instead
-            print("[Push] 📋 User has left room, navigating to sessions view")
-            
-            // Set active session so it's highlighted
-            activeSessionId = session.id
-            
-            // Navigate to sessions view
-            shouldNavigateToSessions = true
-            
-            // Don't mark as viewed - user will see the notification history in SessionsView
-        } else {
-            // Standard flow: join the room
-            print("[Push] 🚀 Joining room from push notification")
-            
-            // If we're in a different room, leave it first
-            if !self.roomId.isEmpty {
-                print("[Push] ⚠️ Leaving current room \(self.roomId.prefix(8)) to join \(roomId.prefix(8))")
-                leave(userInitiated: false)
-                try? await Task.sleep(nanoseconds: 500_000_000) // Brief delay for cleanup
-            }
-            
-            // IMPORTANT: Force a fresh WebSocket reconnection
-            print("[Push] 🔄 Forcing fresh WebSocket reconnection for reliable join...")
-            signaling.disconnect()
-            try? await Task.sleep(nanoseconds: 200_000_000) // 200ms to ensure clean disconnect
-            signaling.connect()
-            
-            // Wait for connection with timeout
-            print("[Push] ⏳ Waiting for WebSocket connection...")
-            for i in 0..<50 { // 5 second timeout (50 * 100ms)
-                if connectionStatus == .connected {
-                    print("[Push] ✅ WebSocket connected (took \(i * 100)ms)")
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            }
-            
-            if connectionStatus != .connected {
-                print("[Push] ❌ Failed to connect to signaling server after 5s timeout")
-                return
-            }
-            
-            // Extra small delay to ensure clientId is properly set
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            
-            // Set active session
-            activeSessionId = session.id
-            
-            // Join the room from the push notification
-            print("[Push] 🚀 Joining room \(roomId.prefix(8))")
-            joinRoom(roomId: roomId)
-            
-            // Trigger UI navigation to chat view
-            shouldNavigateToChat = true
-            print("[Push] 🎯 Triggering navigation to chat view")
-            
-            // Mark notifications as viewed since we're joining
-            markSessionNotificationsAsViewed(sessionId: session.id)
-        }
+        // NO NAVIGATION - just open the app normally
+        // User can manually navigate to SessionsView to see which session has notifications
+        print("[Push] ✅ Notification tracked, app opened without auto-navigation")
     }
     
     @MainActor
