@@ -8,6 +8,7 @@ struct ChatView: View {
     @State private var showLeaveConfirm = false
     @State private var showConnectionCard = false
     @State private var showRoomSettings = false
+    @State private var showLocationPicker = false
 
     var body: some View {
     ZStack(alignment: .center) {
@@ -24,7 +25,13 @@ struct ChatView: View {
                                     .padding(.vertical, 2)
                                     .id(msg.id)
                                     .padding(.horizontal)
+                            } else if msg.isLocationMessage, let location = msg.locationData {
+                                // Location message
+                                let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
+                                LocationMessageBubble(location: location, isFromSelf: msg.isFromSelf, showTime: showTime, timestamp: msg.timestamp)
+                                    .id(msg.id)
                             } else {
+                                // Text message
                                 let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
                                 ChatBubble(message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp), showTime: showTime)
                                     .id(msg.id)
@@ -158,12 +165,30 @@ struct ChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerView { location in
+                chat.sendLocation(location)
+            }
+        }
         .background(DisablePopGesture())
         .safeAreaInset(edge: .bottom) {
             Group {
                 let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 let canSend = chat.isP2PConnected && chat.isEncryptionReady
                 HStack(spacing: 8) {
+                    // Location sharing button
+                    Button {
+                        showLocationPicker = true
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                            .frame(width: 20, height: 30)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!canSend)
+                    .opacity(canSend ? 1 : 0.4)
+                    
                     SearchBarField(
                         text: $input,
                         placeholder: canSend ? "Message" : chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",

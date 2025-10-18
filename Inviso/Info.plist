@@ -20,6 +20,9 @@
 		<string>remote-notification</string>
 	</array>
 	
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We need your location to share it securely in your private chats.</string>
+	
 	<key>NSUserNotificationUsageDescription</key>
 	<string>We need to notify you when your chat partner is waiting so you don't miss conversations.</string>
 </dict>

@@ -19,6 +19,11 @@ struct ChatMessage: Identifiable, Equatable {
     let timestamp: Date
     let isFromSelf: Bool
     var isSystem: Bool = false
+    var locationData: LocationData? = nil // Optional location data for location messages
+    
+    var isLocationMessage: Bool {
+        locationData != nil
+    }
 }
 
 // MARK: - Push Notification Tracking

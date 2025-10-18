@@ -256,6 +256,72 @@ class ChatManager: NSObject, ObservableObject {
             print("❌ Failed to encrypt message: \(error)")
         }
     }
+    
+    func sendLocation(_ location: LocationData) {
+        guard isP2PConnected else { return }
+        guard isEncryptionReady else {
+            print("⚠️ Encryption not ready, cannot send location")
+            return
+        }
+        
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            print("⚠️ No encryption state for current room")
+            return
+        }
+        
+        // Convert location to JSON string
+        guard let locationJSON = location.toJSONString() else {
+            print("❌ Failed to serialize location data")
+            return
+        }
+        
+        do {
+            print("📍 [E2EE] Sending location: \(location.latitude), \(location.longitude)")
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the location JSON
+            let wireFormat = try messageEncryptor.encrypt(
+                locationJSON,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(wireFormat)
+            
+            print("📦 [E2EE] Encrypted location data (\(jsonData.count) bytes)")
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonData)
+            if ok {
+                // Add location message to local chat
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: true)
+                msg.locationData = location
+                messages.append(msg)
+                
+                // Update activity for active session
+                if let sessionId = activeSessionId {
+                    updateSessionActivity(sessionId)
+                }
+            }
+        } catch {
+            print("❌ Failed to encrypt location: \(error)")
+        }
+    }
 
     // MARK: - ChatView Lifecycle Management
     /// Called when ChatView appears. If we have a pending room_ready, process it now.
@@ -1748,8 +1814,17 @@ extension ChatManager: PeerConnectionManagerDelegate {
             state.receiveCounter = max(state.receiveCounter, wireFormat.c + 1)
             encryptionStates[roomId] = state
             
-            // Display decrypted message
-            messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+            // Check if message is a location (JSON format)
+            if let locationData = LocationData.fromJSONString(plaintext) {
+                // Display as location message
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
+                msg.locationData = locationData
+                messages.append(msg)
+                print("📍 Received location: \(locationData.latitude), \(locationData.longitude)")
+            } else {
+                // Display as text message
+                messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+            }
             
             // Update activity for active session
             if let sessionId = activeSessionId {
