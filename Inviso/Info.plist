@@ -23,6 +23,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>We need your location to share it securely in your private chats.</string>
 	
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We need access to your microphone to record and send secure voice messages in your private chats.</string>
+	
 	<key>NSUserNotificationUsageDescription</key>
 	<string>We need to notify you when your chat partner is waiting so you don't miss conversations.</string>
 </dict>

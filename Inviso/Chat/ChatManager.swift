@@ -322,6 +322,72 @@ class ChatManager: NSObject, ObservableObject {
             print("❌ Failed to encrypt location: \(error)")
         }
     }
+    
+    func sendVoice(_ voice: VoiceData) {
+        guard isP2PConnected else { return }
+        guard isEncryptionReady else {
+            print("⚠️ Encryption not ready, cannot send voice")
+            return
+        }
+        
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            print("⚠️ No encryption state for current room")
+            return
+        }
+        
+        // Convert voice to JSON string
+        guard let voiceJSON = voice.toJSONString() else {
+            print("❌ Failed to serialize voice data")
+            return
+        }
+        
+        do {
+            print("🎤 [E2EE] Sending voice message: \(voice.duration)s")
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the voice JSON
+            let wireFormat = try messageEncryptor.encrypt(
+                voiceJSON,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(wireFormat)
+            
+            print("📦 [E2EE] Encrypted voice data (\(jsonData.count) bytes)")
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonData)
+            if ok {
+                // Add voice message to local chat
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: true)
+                msg.voiceData = voice
+                messages.append(msg)
+                
+                // Update activity for active session
+                if let sessionId = activeSessionId {
+                    updateSessionActivity(sessionId)
+                }
+            }
+        } catch {
+            print("❌ Failed to encrypt voice: \(error)")
+        }
+    }
 
     // MARK: - ChatView Lifecycle Management
     /// Called when ChatView appears. If we have a pending room_ready, process it now.
@@ -1821,6 +1887,12 @@ extension ChatManager: PeerConnectionManagerDelegate {
                 msg.locationData = locationData
                 messages.append(msg)
                 print("📍 Received location: \(locationData.latitude), \(locationData.longitude)")
+            } else if let voiceData = VoiceData.fromJSONString(plaintext) {
+                // Display as voice message
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
+                msg.voiceData = voiceData
+                messages.append(msg)
+                print("🎤 Received voice message: \(voiceData.duration)s")
             } else {
                 // Display as text message
                 messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))

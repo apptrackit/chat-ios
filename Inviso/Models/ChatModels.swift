@@ -20,9 +20,14 @@ struct ChatMessage: Identifiable, Equatable {
     let isFromSelf: Bool
     var isSystem: Bool = false
     var locationData: LocationData? = nil // Optional location data for location messages
+    var voiceData: VoiceData? = nil // Optional voice data for voice messages
     
     var isLocationMessage: Bool {
         locationData != nil
+    }
+    
+    var isVoiceMessage: Bool {
+        voiceData != nil
     }
 }
 
