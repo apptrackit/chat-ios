@@ -232,9 +232,9 @@ struct VoiceRecordingView: View {
     
     private func startSampling() {
         samplingTimer?.invalidate()
-        samplingTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { timer in
-            Task { @MainActor in
-                guard recorder.isRecording else {
+        samplingTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak recorder] timer in
+            Task { @MainActor [weak recorder] in
+                guard let recorder = recorder, recorder.isRecording else {
                     timer.invalidate()
                     return
                 }

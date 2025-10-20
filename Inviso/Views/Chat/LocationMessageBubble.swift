@@ -129,13 +129,24 @@ struct LocationMessageBubble: View {
     }
     
     private func openInMaps() {
-        let placemark = MKPlacemark(coordinate: location.coordinate)
-        let mapItem = MKMapItem(placemark: placemark)
-        mapItem.name = "Shared Location"
-        mapItem.openInMaps(launchOptions: [
-            MKLaunchOptionsMapCenterKey: NSValue(mkCoordinate: location.coordinate),
-            MKLaunchOptionsMapSpanKey: NSValue(mkCoordinateSpan: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
-        ])
+        if #available(iOS 26.0, *) {
+            // Create CLLocation from coordinates
+            let clLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+            let mapItem = MKMapItem(location: clLocation, address: nil)
+            mapItem.name = "Shared Location"
+            mapItem.openInMaps(launchOptions: [
+                MKLaunchOptionsMapCenterKey: NSValue(mkCoordinate: location.coordinate),
+                MKLaunchOptionsMapSpanKey: NSValue(mkCoordinateSpan: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
+            ])
+        } else {
+            let placemark = MKPlacemark(coordinate: location.coordinate)
+            let mapItem = MKMapItem(placemark: placemark)
+            mapItem.name = "Shared Location"
+            mapItem.openInMaps(launchOptions: [
+                MKLaunchOptionsMapCenterKey: NSValue(mkCoordinate: location.coordinate),
+                MKLaunchOptionsMapSpanKey: NSValue(mkCoordinateSpan: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
+            ])
+        }
     }
     
     private func copyCoordinates() {

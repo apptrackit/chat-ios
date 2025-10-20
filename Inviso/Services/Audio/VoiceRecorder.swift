@@ -48,25 +48,49 @@ class VoiceRecorder: NSObject, ObservableObject {
     
     /// Check microphone permission
     func checkPermission() {
-        switch AVAudioSession.sharedInstance().recordPermission {
-        case .granted:
-            hasPermission = true
-        case .denied:
-            hasPermission = false
-        case .undetermined:
-            hasPermission = false
-        @unknown default:
-            hasPermission = false
+        if #available(iOS 17.0, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted:
+                hasPermission = true
+            case .denied:
+                hasPermission = false
+            case .undetermined:
+                hasPermission = false
+            @unknown default:
+                hasPermission = false
+            }
+        } else {
+            switch AVAudioSession.sharedInstance().recordPermission {
+            case .granted:
+                hasPermission = true
+            case .denied:
+                hasPermission = false
+            case .undetermined:
+                hasPermission = false
+            @unknown default:
+                hasPermission = false
+            }
         }
     }
     
     /// Request microphone permission
     func requestPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                Task { @MainActor in
-                    self.hasPermission = granted
-                    continuation.resume(returning: granted)
+        if #available(iOS 17.0, *) {
+            return await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    Task { @MainActor in
+                        self.hasPermission = granted
+                        continuation.resume(returning: granted)
+                    }
+                }
+            }
+        } else {
+            return await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    Task { @MainActor in
+                        self.hasPermission = granted
+                        continuation.resume(returning: granted)
+                    }
                 }
             }
         }

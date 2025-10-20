@@ -33,7 +33,7 @@ struct VoiceMessageBubble: View {
     }
     
     private var bubbleMaxWidth: CGFloat {
-        min(UIScreen.main.bounds.width * 0.72, 340)
+        280
     }
     
     private var durationLabel: String {
@@ -53,17 +53,11 @@ struct VoiceMessageBubble: View {
                 playbackButton
                 
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Label("Voice note", systemImage: "waveform")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.white.opacity(0.82))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.08), in: Capsule())
-                        Spacer()
+                    HStack(alignment: .center) {
                         Text(durationLabel)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(Color.white.opacity(0.8))
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(Color.white.opacity(0.9))
+                        Spacer()
                     }
                     
                     if loadError {
@@ -77,16 +71,6 @@ struct VoiceMessageBubble: View {
                             color: accentColor
                         )
                         .frame(height: 36)
-                    }
-                    
-                    HStack(alignment: .center) {
-                        Label(player.isPlaying ? "Playing" : "Tap to listen", systemImage: player.isPlaying ? "speaker.wave.2" : "play.circle")
-                            .font(.caption2)
-                            .foregroundStyle(Color.white.opacity(0.75))
-                        Spacer()
-                        Label("E2EE", systemImage: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Color.white.opacity(0.55))
                     }
                 }
             }

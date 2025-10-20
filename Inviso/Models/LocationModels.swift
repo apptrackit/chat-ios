@@ -10,13 +10,14 @@ import CoreLocation
 
 /// Location data compatible with Android format
 struct LocationData: Codable, Equatable {
-    let type: String = "location"
+    let type: String
     let latitude: Double
     let longitude: Double
     let accuracy: Double?
     let timestamp: Int64 // Unix timestamp in milliseconds
     
     init(latitude: Double, longitude: Double, accuracy: Double? = nil, timestamp: Date = Date()) {
+        self.type = "location"
         self.latitude = latitude
         self.longitude = longitude
         self.accuracy = accuracy
@@ -24,6 +25,7 @@ struct LocationData: Codable, Equatable {
     }
     
     init(from location: CLLocation) {
+        self.type = "location"
         self.latitude = location.coordinate.latitude
         self.longitude = location.coordinate.longitude
         self.accuracy = location.horizontalAccuracy

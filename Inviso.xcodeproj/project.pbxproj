@@ -256,7 +256,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InvisoNotificationService/InvisoNotificationService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InvisoNotificationService/Info.plist;
@@ -285,7 +285,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = InvisoNotificationService/InvisoNotificationService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 32;
+				CURRENT_PROJECT_VERSION = 33;
 				DEVELOPMENT_TEAM = S4AJ4WBQ76;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InvisoNotificationService/Info.plist;

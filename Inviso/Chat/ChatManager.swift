@@ -736,7 +736,7 @@ class ChatManager: NSObject, ObservableObject {
     
     /// Sync server-side badge to match local unread count
     private func syncServerBadgeCount() async {
-        guard let session = sessions.first, let roomId = session.roomId else {
+        guard let session = sessions.first, let _ = session.roomId else {
             print("[ChatManager] ⚠️ No active session to sync badge for")
             return
         }

@@ -9,13 +9,14 @@ import Foundation
 
 /// Voice message data compatible with Android
 struct VoiceData: Codable, Equatable {
-    let type: String = "voice"
+    let type: String
     let duration: Double // seconds
     let waveform: [Float] // normalized levels for visualization
     let audioData: String // base64 encoded audio (m4a)
     let timestamp: Int64 // Unix timestamp in milliseconds
     
     init(duration: Double, waveform: [Float], audioData: Data, timestamp: Date = Date()) {
+        self.type = "voice"
         self.duration = duration
         self.waveform = waveform
         self.audioData = audioData.base64EncodedString()
