@@ -29,6 +29,9 @@ struct RoomSettingsView: View {
                 // Info Section
                 infoSection
                 
+                // Retention Policy
+                retentionSection
+
                 // Danger Zone
                 dangerZoneSection
             }
@@ -322,6 +325,69 @@ struct RoomSettingsView: View {
                 Divider()
                     .padding(.leading, 52)
             }
+        }
+    }
+
+    private var retentionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Message Retention")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+
+            VStack(spacing: 12) {
+                // Picker for retention policy
+                Picker(selection: Binding(
+                    get: { chat.currentRetentionPolicy },
+                    set: { newPolicy in
+                        chat.updateRetentionPolicy(newPolicy)
+                    }
+                ), label: Text("Retention")) {
+                    ForEach(MessageRetentionPolicy.allCases, id: \.self) { policy in
+                        HStack {
+                            Image(systemName: policy.icon)
+                            Text(policy.displayName)
+                        }
+                        .tag(policy)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                // Show peer policy if available
+                if let peer = chat.peerRetentionPolicy {
+                    HStack {
+                        Text("Peer preference:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(peer.displayName)
+                            .font(.caption)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 8)
+                }
+
+                // Delete all stored messages
+                Button {
+                    chat.deleteAllMessages()
+                } label: {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("Delete All Saved Messages")
+                        Spacer()
+                    }
+                    .foregroundColor(.red)
+                    .padding()
+                    .background(Color(UIColor.secondarySystemGroupedBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .background(Color(UIColor.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+            )
         }
     }
     

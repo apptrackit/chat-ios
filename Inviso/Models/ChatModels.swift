@@ -13,14 +13,15 @@ enum ConnectionStatus: String, CaseIterable {
     case connected = "Connected"
 }
 
-struct ChatMessage: Identifiable, Equatable {
-    let id = UUID()
+struct ChatMessage: Identifiable, Equatable, Codable {
+    let id: UUID
     var text: String
     let timestamp: Date
     let isFromSelf: Bool
     var isSystem: Bool = false
     var locationData: LocationData? = nil // Optional location data for location messages
     var voiceData: VoiceData? = nil // Optional voice data for voice messages
+    var expiresAt: Date? = nil // Message expiration timestamp based on retention policy
     
     var isLocationMessage: Bool {
         locationData != nil
@@ -28,6 +29,22 @@ struct ChatMessage: Identifiable, Equatable {
     
     var isVoiceMessage: Bool {
         voiceData != nil
+    }
+    
+    var isExpired: Bool {
+        guard let expiresAt = expiresAt else { return false }
+        return Date() > expiresAt
+    }
+    
+    init(id: UUID = UUID(), text: String, timestamp: Date, isFromSelf: Bool, isSystem: Bool = false, locationData: LocationData? = nil, voiceData: VoiceData? = nil, expiresAt: Date? = nil) {
+        self.id = id
+        self.text = text
+        self.timestamp = timestamp
+        self.isFromSelf = isFromSelf
+        self.isSystem = isSystem
+        self.locationData = locationData
+        self.voiceData = voiceData
+        self.expiresAt = expiresAt
     }
 }
 
@@ -151,5 +168,81 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var displayName: String {
         if let n = name, !n.isEmpty { return n }
         return "Room \(code)"
+    }
+}
+
+// MARK: - Message Retention Policy
+
+/// Defines how long messages should be stored locally before automatic deletion
+enum MessageRetentionPolicy: String, Codable, CaseIterable, Equatable {
+    case noStorage = "no_storage"   // Ephemeral - messages deleted immediately (original behavior)
+    case oneHour = "1_hour"         // Messages expire after 1 hour
+    case twentyFourHours = "24_hours" // Messages expire after 24 hours
+    case oneWeek = "1_week"         // Messages expire after 1 week
+    
+    var displayName: String {
+        switch self {
+        case .noStorage: return "No Storage (Ephemeral)"
+        case .oneHour: return "1 Hour"
+        case .twentyFourHours: return "24 Hours"
+        case .oneWeek: return "1 Week"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .noStorage: return "Messages are never saved"
+        case .oneHour: return "Messages deleted after 1 hour"
+        case .twentyFourHours: return "Messages deleted after 24 hours"
+        case .oneWeek: return "Messages deleted after 1 week"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .noStorage: return "eye.slash"
+        case .oneHour: return "clock"
+        case .twentyFourHours: return "clock.badge.checkmark"
+        case .oneWeek: return "calendar"
+        }
+    }
+    
+    /// Returns nil for noStorage (ephemeral), otherwise duration in seconds
+    var durationSeconds: TimeInterval? {
+        switch self {
+        case .noStorage: return nil
+        case .oneHour: return 3600
+        case .twentyFourHours: return 86400
+        case .oneWeek: return 604800
+        }
+    }
+    
+    /// Calculate expiration date for a message created now
+    func expirationDate(from timestamp: Date = Date()) -> Date? {
+        guard let duration = durationSeconds else { return nil }
+        return timestamp.addingTimeInterval(duration)
+    }
+}
+
+/// Special encrypted message type for syncing retention policy between peers
+struct RetentionPolicyMessage: Codable {
+    let type = "retention_policy_sync"
+    let policy: MessageRetentionPolicy
+    let timestamp: Date
+    
+    func toJSONString() -> String? {
+        guard let data = try? JSONEncoder().encode(self),
+              let string = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return string
+    }
+    
+    static func fromJSONString(_ string: String) -> RetentionPolicyMessage? {
+        guard let data = string.data(using: .utf8),
+              let message = try? JSONDecoder().decode(RetentionPolicyMessage.self, from: data) else {
+            return nil
+        }
+        return message
     }
 }

@@ -35,6 +35,14 @@ class ChatManager: NSObject, ObservableObject {
     @Published var isEncryptionReady: Bool = false // True when key exchange completes and encryption is active
     @Published var keyExchangeInProgress: Bool = false // True during key negotiation
 
+    // Message retention policy (per session)
+    @Published var currentRetentionPolicy: MessageRetentionPolicy = .noStorage
+    @Published var peerRetentionPolicy: MessageRetentionPolicy? = nil // Peer's policy (nil if not synced yet)
+    
+    // Message storage
+    private let messageStorage = MessageStorage.shared
+    private var expirationCleanupTimer: Timer?
+
     // Components (dynamic server config)
     private var signaling: SignalingClient
     private var apiBase: URL { URL(string: "https://\(ServerConfig.shared.host)")! }
@@ -80,6 +88,7 @@ class ChatManager: NSObject, ObservableObject {
         setupKeyExchangeObservers()
         setupAppLifecycleObservers()
         setupPushNotificationObservers()
+        setupRetentionCleanupTimer()
         
         // Sync pending notifications from Notification Service Extension
         syncPendingNotifications()
@@ -143,6 +152,16 @@ class ChatManager: NSObject, ObservableObject {
         self.roomId = roomId
         // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
         
+        // Load stored messages for this session based on retention policy
+        if let sessionId = activeSessionId, currentRetentionPolicy != .noStorage {
+            do {
+                messages = try messageStorage.loadMessages(for: sessionId)
+                print("[ChatManager] 📖 Loaded \(messages.count) stored messages")
+            } catch {
+                print("[ChatManager] ⚠️ Failed to load messages: \(error)")
+            }
+        }
+        
         // Find the session's ephemeral device ID to send to backend for push notification matching
         let deviceId = sessions.first(where: { $0.roomId == roomId })?.ephemeralDeviceId
         
@@ -162,6 +181,17 @@ class ChatManager: NSObject, ObservableObject {
             wasInRoomBeforeDisconnect = nil
         }
         guard !roomId.isEmpty else { return }
+        
+        // Save messages before clearing if retention policy is not noStorage
+        if let sessionId = activeSessionId, currentRetentionPolicy != .noStorage {
+            do {
+                try messageStorage.saveMessages(messages, for: sessionId)
+                print("[ChatManager] 💾 Saved \(messages.count) messages before leaving")
+            } catch {
+                print("[ChatManager] ⚠️ Failed to save messages: \(error)")
+            }
+        }
+        
     messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
@@ -246,10 +276,22 @@ class ChatManager: NSObject, ObservableObject {
             // Send encrypted binary data over DataChannel
             let ok = pcm.sendData(jsonData)
             if ok {
-                messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true))
+                // Calculate expiration date based on current retention policy
+                let expiresAt = currentRetentionPolicy.expirationDate(from: Date())
+                
+                messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true, expiresAt: expiresAt))
                 // Update activity for active session
                 if let sessionId = activeSessionId {
                     updateSessionActivity(sessionId)
+                    
+                    // Save messages if retention policy is not noStorage
+                    if currentRetentionPolicy != .noStorage {
+                        do {
+                            try messageStorage.saveMessages(messages, for: sessionId)
+                        } catch {
+                            print("[ChatManager] ⚠️ Failed to save messages: \(error)")
+                        }
+                    }
                 }
             }
         } catch {
@@ -419,6 +461,8 @@ class ChatManager: NSObject, ObservableObject {
         persistSessions()
         // Clear all ephemeral IDs
         DeviceIDManager.shared.clearAllEphemeralIDs()
+        // Clear all stored messages
+        messageStorage.eraseAll()
     }
 
     // MARK: - Deep Link Handling (inviso://join/<code>)
@@ -1880,27 +1924,49 @@ extension ChatManager: PeerConnectionManagerDelegate {
             state.receiveCounter = max(state.receiveCounter, wireFormat.c + 1)
             encryptionStates[roomId] = state
             
+            // Calculate expiration date based on current retention policy
+            let expiresAt = currentRetentionPolicy.expirationDate(from: Date())
+            
+            // Check if message is a retention policy sync message
+            if let policyMessage = RetentionPolicyMessage.fromJSONString(plaintext) {
+                print("🔄 [Retention] Received policy sync: \(policyMessage.policy.displayName)")
+                peerRetentionPolicy = policyMessage.policy
+                // Don't add to messages list - this is a control message
+                return
+            }
+            
             // Check if message is a location (JSON format)
             if let locationData = LocationData.fromJSONString(plaintext) {
                 // Display as location message
                 var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
                 msg.locationData = locationData
+                msg.expiresAt = expiresAt
                 messages.append(msg)
                 print("📍 Received location: \(locationData.latitude), \(locationData.longitude)")
             } else if let voiceData = VoiceData.fromJSONString(plaintext) {
                 // Display as voice message
                 var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
                 msg.voiceData = voiceData
+                msg.expiresAt = expiresAt
                 messages.append(msg)
                 print("🎤 Received voice message: \(voiceData.duration)s")
             } else {
                 // Display as text message
-                messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+                messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false, expiresAt: expiresAt))
             }
             
             // Update activity for active session
             if let sessionId = activeSessionId {
                 updateSessionActivity(sessionId)
+                
+                // Save messages if retention policy is not noStorage
+                if currentRetentionPolicy != .noStorage {
+                    do {
+                        try messageStorage.saveMessages(messages, for: sessionId)
+                    } catch {
+                        print("[ChatManager] ⚠️ Failed to save messages: \(error)")
+                    }
+                }
             }
             
         } catch {
@@ -2047,5 +2113,168 @@ extension ChatManager {
         } catch {
             return .unreachable
         }
+    }
+}
+
+// MARK: - Message Retention Policy
+extension ChatManager {
+    
+    /// Update retention policy for current session and sync with peer
+    func updateRetentionPolicy(_ policy: MessageRetentionPolicy) {
+        guard isEncryptionReady else {
+            print("⚠️ [Retention] Cannot update policy - encryption not ready")
+            return
+        }
+        
+        currentRetentionPolicy = policy
+        print("🔄 [Retention] Updated local policy to: \(policy.displayName)")
+        
+        // Update expiration dates for existing messages
+        updateMessageExpiration()
+        
+        // Send policy update to peer via E2EE
+        syncRetentionPolicyWithPeer(policy)
+        
+        // If switching to noStorage, delete stored messages
+        if policy == .noStorage, let sessionId = activeSessionId {
+            try? messageStorage.deleteMessages(for: sessionId)
+            print("🗑️ [Retention] Deleted stored messages (switched to noStorage)")
+        }
+        
+        // If switching to storage mode, save current messages
+        if policy != .noStorage, let sessionId = activeSessionId {
+            do {
+                try messageStorage.saveMessages(messages, for: sessionId)
+                print("💾 [Retention] Saved current messages (switched to storage mode)")
+            } catch {
+                print("⚠️ [Retention] Failed to save messages: \(error)")
+            }
+        }
+    }
+    
+    /// Sync retention policy with peer over E2EE channel
+    private func syncRetentionPolicyWithPeer(_ policy: MessageRetentionPolicy) {
+        guard isP2PConnected, isEncryptionReady else {
+            print("⚠️ [Retention] Cannot sync - not connected or encryption not ready")
+            return
+        }
+        
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            print("⚠️ [Retention] No encryption state for current room")
+            return
+        }
+        
+        let policyMessage = RetentionPolicyMessage(policy: policy, timestamp: Date())
+        
+        guard let plaintext = policyMessage.toJSONString() else {
+            print("⚠️ [Retention] Failed to serialize policy message")
+            return
+        }
+        
+        do {
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the policy message
+            let wireFormat = try messageEncryptor.encrypt(
+                plaintext,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonData)
+            if ok {
+                print("✅ [Retention] Sent policy sync to peer: \(policy.displayName)")
+            } else {
+                print("❌ [Retention] Failed to send policy sync")
+            }
+        } catch {
+            print("❌ [Retention] Failed to encrypt policy sync: \(error)")
+        }
+    }
+    
+    /// Update expiration dates for all existing messages based on current policy
+    private func updateMessageExpiration() {
+        let now = Date()
+        messages = messages.map { message in
+            var updated = message
+            // For existing messages, calculate expiration from their original timestamp
+            updated.expiresAt = currentRetentionPolicy.expirationDate(from: message.timestamp)
+            return updated
+        }
+        
+        // Save updated messages if not in noStorage mode
+        if currentRetentionPolicy != .noStorage, let sessionId = activeSessionId {
+            do {
+                try messageStorage.saveMessages(messages, for: sessionId)
+            } catch {
+                print("⚠️ [Retention] Failed to save updated messages: \(error)")
+            }
+        }
+    }
+    
+    /// Delete all messages in current session
+    func deleteAllMessages() {
+        messages.removeAll()
+        
+        if let sessionId = activeSessionId {
+            try? messageStorage.deleteMessages(for: sessionId)
+            print("🗑️ [Retention] Deleted all messages for current session")
+        }
+    }
+    
+    /// Setup timer for automatic cleanup of expired messages
+    private func setupRetentionCleanupTimer() {
+        // Run cleanup every 5 minutes
+        expirationCleanupTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            self?.cleanupExpiredMessages()
+        }
+        
+        // Also run cleanup on app becoming active
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.cleanupExpiredMessages()
+        }
+    }
+    
+    /// Remove expired messages from memory and storage
+    private func cleanupExpiredMessages() {
+        let originalCount = messages.count
+        messages.removeAll { $0.isExpired }
+        
+        if messages.count != originalCount {
+            print("🗑️ [Retention] Cleaned \(originalCount - messages.count) expired messages from memory")
+            
+            // Save cleaned messages if not in noStorage mode
+            if currentRetentionPolicy != .noStorage, let sessionId = activeSessionId {
+                do {
+                    try messageStorage.saveMessages(messages, for: sessionId)
+                } catch {
+                    print("⚠️ [Retention] Failed to save cleaned messages: \(error)")
+                }
+            }
+        }
+        
+        // Also run storage-wide cleanup
+        messageStorage.cleanupExpiredMessages()
     }
 }
