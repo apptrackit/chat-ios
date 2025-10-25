@@ -232,10 +232,9 @@ struct VoiceRecordingView: View {
     
     private func startSampling() {
         samplingTimer?.invalidate()
-        samplingTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak recorder] timer in
+        samplingTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak recorder] _ in
             Task { @MainActor [weak recorder] in
                 guard let recorder = recorder, recorder.isRecording else {
-                    timer.invalidate()
                     return
                 }
                 waveformSamples.append(max(0.05, recorder.recordingLevel))
