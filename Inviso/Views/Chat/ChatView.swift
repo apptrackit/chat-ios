@@ -10,6 +10,9 @@ struct ChatView: View {
     @State private var showRoomSettings = false
     @State private var showLocationPicker = false
     @State private var showVoiceRecorder = false
+    @State private var showPermissionAlert = false
+    @State private var permissionAlertMessage = ""
+    @StateObject private var permissionManager = PermissionManager.shared
 
     var body: some View {
     ZStack(alignment: .center) {
@@ -176,6 +179,18 @@ struct ChatView: View {
                 chat.sendLocation(location)
             }
         }
+        .alert("Permission Required", isPresented: $showPermissionAlert) {
+            Button("OK", role: .cancel) {}
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    Task { @MainActor in
+                        await UIApplication.shared.open(url)
+                    }
+                }
+            }
+        } message: {
+            Text(permissionAlertMessage)
+        }
         .overlay {
             if showVoiceRecorder {
                 VoiceRecordingView { voice in
@@ -197,8 +212,13 @@ struct ChatView: View {
                     if !hasText {
                         // Voice message button (only when no text)
                         Button {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                                showVoiceRecorder = true
+                            if !permissionManager.canUseVoiceMessages {
+                                permissionAlertMessage = "Microphone permission is required to send voice messages. Enable it in Settings > Permissions."
+                                showPermissionAlert = true
+                            } else {
+                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                    showVoiceRecorder = true
+                                }
                             }
                         } label: {
                             Image(systemName: "waveform")
@@ -213,7 +233,12 @@ struct ChatView: View {
                         
                         // Location sharing button (only when no text)
                         Button {
-                            showLocationPicker = true
+                            if !permissionManager.canUseLocationSharing {
+                                permissionAlertMessage = "Location permission is required to share your location. Enable it in Settings > Permissions."
+                                showPermissionAlert = true
+                            } else {
+                                showLocationPicker = true
+                            }
                         } label: {
                             Image(systemName: "location.fill")
                                 .font(.system(size: 16, weight: .semibold))

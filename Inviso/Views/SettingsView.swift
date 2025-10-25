@@ -52,6 +52,19 @@ struct SettingsView: View {
                 }
                 
                 NavigationLink {
+                    PermissionsView()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Permissions")
+                            Text("Manage app permissions and features")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                NavigationLink {
                     NotificationSettingsView()
                 } label: {
                     HStack {
@@ -116,6 +129,16 @@ struct SettingsView: View {
                 }
                 .disabled(isErasing)
                 .help("Removes local data and cache, purges server data for this device, and resets the device ID.")
+                
+                Button {
+                    OnboardingManager.shared.resetOnboarding()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Reset Onboarding")
+                    }
+                }
+                .help("Reset onboarding to see the welcome screens again on next launch.")
             }
         }
         .navigationTitle("Settings")
