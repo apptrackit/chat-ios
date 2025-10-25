@@ -7,20 +7,24 @@
 
 import SwiftUI
 
+extension Color {
+    static let onboardingAccent = Color(red: 0x25 / 255.0, green: 0x96 / 255.0, blue: 0xbe / 255.0)
+}
+
 struct OnboardingView: View {
     @StateObject private var permissionManager = PermissionManager.shared
     @StateObject private var onboardingManager = OnboardingManager.shared
     @ObservedObject private var serverConfig = ServerConfig.shared
     
     @State private var currentStep: OnboardingStep = .welcome
-    @State private var passphrase = ""
-    @State private var confirmPassphrase = ""
-    @State private var passphraseError: String?
+    @State private var passcode = ""
+    @State private var confirmPasscode = ""
+    @State private var passcodeError: String?
     @State private var serverHost = ServerConfig.shared.host
     @State private var enableBiometric = false
     @State private var isRequestingPermission = false
     
-    @FocusState private var passphraseFieldFocused: Bool
+    @FocusState private var passcodeFieldFocused: Bool
     @FocusState private var confirmFieldFocused: Bool
     @FocusState private var serverFieldFocused: Bool
     
@@ -57,7 +61,7 @@ struct OnboardingView: View {
         ZStack {
             // Background gradient
             LinearGradient(
-                colors: [Color.blue.opacity(0.15), Color.purple.opacity(0.1)],
+                colors: [Color.onboardingAccent.opacity(0.15), Color.purple.opacity(0.1)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -116,7 +120,7 @@ struct OnboardingView: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(
                         LinearGradient(
-                            colors: [Color.blue, Color.purple],
+                            colors: [Color.onboardingAccent, Color.purple],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
@@ -199,12 +203,12 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 Image(systemName: "checkmark.shield.fill")
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                 
                 Text("Permissions")
                     .font(.largeTitle.weight(.bold))
                 
-                Text("Inviso needs your permission to enable certain features. You can enable or skip any permission.")
+                Text("Grant permissions one by one to enable features. You can skip any permission and enable it later.")
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -212,55 +216,10 @@ struct OnboardingView: View {
             }
             .padding(.bottom, 8)
             
-            VStack(spacing: 16) {
-                PermissionCard(
-                    icon: "location.fill",
-                    title: "Location",
-                    description: "Share your location in chats",
-                    status: permissionManager.locationStatus,
-                    isRequesting: isRequestingPermission,
-                    onRequest: {
-                        isRequestingPermission = true
-                        Task {
-                            _ = await permissionManager.requestLocationPermission()
-                            isRequestingPermission = false
-                        }
-                    },
-                    onSettings: permissionManager.openSettings
-                )
-                
-                PermissionCard(
-                    icon: "mic.fill",
-                    title: "Microphone",
-                    description: "Send voice messages",
-                    status: permissionManager.microphoneStatus,
-                    isRequesting: isRequestingPermission,
-                    onRequest: {
-                        isRequestingPermission = true
-                        Task {
-                            _ = await permissionManager.requestMicrophonePermission()
-                            isRequestingPermission = false
-                        }
-                    },
-                    onSettings: permissionManager.openSettings
-                )
-                
-                PermissionCard(
-                    icon: "bell.fill",
-                    title: "Notifications",
-                    description: "Get notified when someone joins",
-                    status: permissionManager.notificationStatus,
-                    isRequesting: isRequestingPermission,
-                    onRequest: {
-                        isRequestingPermission = true
-                        Task {
-                            _ = await permissionManager.requestNotificationPermission()
-                            isRequestingPermission = false
-                        }
-                    },
-                    onSettings: permissionManager.openSettings
-                )
-            }
+            SequentialPermissionFlow(
+                permissionManager: permissionManager,
+                isRequestingPermission: $isRequestingPermission
+            )
             
             Text("You can always change these later in Settings")
                 .font(.caption)
@@ -277,7 +236,7 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 Image(systemName: "server.rack")
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                 
                 Text("Server Configuration")
                     .font(.largeTitle.weight(.bold))
@@ -308,7 +267,7 @@ struct OnboardingView: View {
                         serverHost = "chat.ballabotond.com"
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
-                            .foregroundColor(.blue)
+                            .foregroundColor(.onboardingAccent)
                             .padding()
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(12)
@@ -324,7 +283,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "info.circle")
-                        .foregroundColor(.blue)
+                        .foregroundColor(.onboardingAccent)
                     Text("About the Server")
                         .font(.headline)
                 }
@@ -335,24 +294,24 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding()
-            .background(Color.blue.opacity(0.1))
+            .background(Color.onboardingAccent.opacity(0.1))
             .cornerRadius(12)
         }
     }
     
-    // MARK: - Passphrase
+    // MARK: - Passcode
     
     private var passphraseView: some View {
         VStack(spacing: 24) {
             VStack(spacing: 12) {
                 Image(systemName: "key.fill")
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                 
-                Text("Set Passphrase")
+                Text("Set Passcode")
                     .font(.largeTitle.weight(.bold))
                 
-                Text("Create a passphrase to protect your app. This is required and cannot be recovered if forgotten.")
+                Text("Create a numeric passcode to protect your app. This is required and cannot be recovered if forgotten.")
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -361,36 +320,52 @@ struct OnboardingView: View {
             
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Passphrase")
+                    Text("Passcode")
                         .font(.headline)
                     
-                    SecureField("Enter passphrase (min 8 characters)", text: $passphrase)
+                    SecureField("Enter passcode (4-10 digits)", text: $passcode)
+                        .keyboardType(.numberPad)
                         .textContentType(.newPassword)
-                        .focused($passphraseFieldFocused)
+                        .focused($passcodeFieldFocused)
                         .padding()
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(12)
-                        .onChange(of: passphrase) { _, _ in
-                            passphraseError = nil
+                        .onChange(of: passcode) { _, newValue in
+                            // Limit to 10 digits and numbers only
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered.count > 10 {
+                                passcode = String(filtered.prefix(10))
+                            } else if filtered != newValue {
+                                passcode = filtered
+                            }
+                            passcodeError = nil
                         }
                 }
                 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Confirm Passphrase")
+                    Text("Confirm Passcode")
                         .font(.headline)
                     
-                    SecureField("Re-enter passphrase", text: $confirmPassphrase)
+                    SecureField("Re-enter passcode", text: $confirmPasscode)
+                        .keyboardType(.numberPad)
                         .textContentType(.newPassword)
                         .focused($confirmFieldFocused)
                         .padding()
                         .background(Color(UIColor.secondarySystemBackground))
                         .cornerRadius(12)
-                        .onChange(of: confirmPassphrase) { _, _ in
-                            passphraseError = nil
+                        .onChange(of: confirmPasscode) { _, newValue in
+                            // Limit to 10 digits and numbers only
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered.count > 10 {
+                                confirmPasscode = String(filtered.prefix(10))
+                            } else if filtered != newValue {
+                                confirmPasscode = filtered
+                            }
+                            passcodeError = nil
                         }
                 }
                 
-                if let error = passphraseError {
+                if let error = passcodeError {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
                         Text(error)
@@ -409,7 +384,7 @@ struct OnboardingView: View {
                         .font(.headline)
                 }
                 
-                Text("• Minimum 8 characters\n• Cannot be recovered if forgotten\n• Required to unlock the app")
+                Text("• 4 to 10 digits only\n• Cannot be recovered if forgotten\n• Required to unlock the app")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -420,7 +395,7 @@ struct OnboardingView: View {
         }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                passphraseFieldFocused = true
+                passcodeFieldFocused = true
             }
         }
     }
@@ -432,14 +407,14 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 Image(systemName: biometricCapability.systemImageName)
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                 
                 Text(biometricCapability == .none ? "Biometric Not Available" : "Enable \(biometricCapability.localizedName)?")
                     .font(.largeTitle.weight(.bold))
                     .multilineTextAlignment(.center)
                 
                 if biometricCapability == .none {
-                    Text("Biometric authentication is not available on this device. You'll use your passphrase to unlock the app.")
+                    Text("Biometric authentication is not available on this device. You'll use your passcode to unlock the app.")
                         .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -458,7 +433,7 @@ struct OnboardingView: View {
                         HStack {
                             Image(systemName: biometricCapability.systemImageName)
                                 .font(.title2)
-                                .foregroundColor(.blue)
+                                .foregroundColor(.onboardingAccent)
                             
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Enable \(biometricCapability.localizedName)")
@@ -469,26 +444,41 @@ struct OnboardingView: View {
                             }
                         }
                     }
-                    .tint(.blue)
+                    .tint(.onboardingAccent)
                     .padding()
                     .background(Color(UIColor.secondarySystemBackground))
                     .cornerRadius(12)
+                    .onChange(of: enableBiometric) { _, newValue in
+                        if newValue {
+                            // Immediately prompt for biometric authentication when toggled on
+                            Task {
+                                let result = await BiometricAuth.shared.authenticateWithBiometrics(reason: "Confirm your identity to enable \(biometricCapability.localizedName)")
+                                if case .success = result {
+                                    // Keep enabled
+                                    enableBiometric = true
+                                } else {
+                                    // User cancelled or failed - turn it back off
+                                    enableBiometric = false
+                                }
+                            }
+                        }
+                    }
                     
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Image(systemName: "info.circle")
-                                .foregroundColor(.blue)
+                                .foregroundColor(.onboardingAccent)
                             Text("Note")
                                 .font(.headline)
                         }
                         
-                        Text("You can still use your passphrase to unlock even with \(biometricCapability.localizedName) enabled.")
+                        Text("You can still use your passcode to unlock even with \(biometricCapability.localizedName) enabled.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding()
-                    .background(Color.blue.opacity(0.1))
+                    .background(Color.onboardingAccent.opacity(0.1))
                     .cornerRadius(12)
                 }
             }
@@ -502,7 +492,7 @@ struct OnboardingView: View {
             VStack(spacing: 12) {
                 Image(systemName: "graduationcap.fill")
                     .font(.system(size: 64))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                 
                 Text("How It Works")
                     .font(.largeTitle.weight(.bold))
@@ -575,7 +565,7 @@ struct OnboardingView: View {
                 } label: {
                     Text("Back")
                         .font(.headline)
-                        .foregroundColor(.blue)
+                        .foregroundColor(.onboardingAccent)
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color(UIColor.secondarySystemBackground))
@@ -630,7 +620,7 @@ struct OnboardingView: View {
     }
     
     private var isPassphraseValid: Bool {
-        !passphrase.isEmpty && passphrase.count >= 8 && passphrase == confirmPassphrase
+        !passcode.isEmpty && passcode.count >= 4 && passcode.count <= 10 && passcode == confirmPasscode
     }
     
     // MARK: - Navigation Logic
@@ -676,16 +666,26 @@ struct OnboardingView: View {
     // MARK: - Data Saving
     
     private func validatePassphrase() -> Bool {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        let confirmedTrimmed = confirmPassphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let confirmedTrimmed = confirmPasscode.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        guard trimmed.count >= 8 else {
-            passphraseError = "Passphrase must be at least 8 characters"
+        guard trimmed.count >= 4 else {
+            passcodeError = "Passcode must be at least 4 digits"
+            return false
+        }
+        
+        guard trimmed.count <= 10 else {
+            passcodeError = "Passcode cannot exceed 10 digits"
+            return false
+        }
+        
+        guard trimmed.allSatisfy({ $0.isNumber }) else {
+            passcodeError = "Passcode must contain only numbers"
             return false
         }
         
         guard trimmed == confirmedTrimmed else {
-            passphraseError = "Passphrases do not match"
+            passcodeError = "Passcodes do not match"
             return false
         }
         
@@ -694,9 +694,9 @@ struct OnboardingView: View {
     
     private func savePassphrase() {
         do {
-            try PassphraseManager.shared.setPassphrase(passphrase)
+            try PassphraseManager.shared.setPassphrase(passcode)
         } catch {
-            passphraseError = "Failed to save passphrase. Please try again."
+            passcodeError = "Failed to save passcode. Please try again."
         }
     }
     
@@ -736,7 +736,7 @@ private struct FeatureRow: View {
         HStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundColor(.blue)
+                .foregroundColor(.onboardingAccent)
                 .frame(width: 32)
             
             Text(text)
@@ -747,6 +747,263 @@ private struct FeatureRow: View {
         }
     }
 }
+
+// MARK: - Sequential Permission Flow
+
+private struct SequentialPermissionFlow: View {
+    @ObservedObject var permissionManager: PermissionManager
+    @Binding var isRequestingPermission: Bool
+    @State private var currentPermissionIndex = 0
+    @State private var showingLocalNetworkInfo = false
+    
+    private let permissions: [(icon: String, title: String, description: String, keyPath: KeyPath<PermissionManager, PermissionManager.PermissionStatus>, request: (PermissionManager) async -> Bool)] = [
+        (icon: "location.fill", title: "Location", description: "Share your location in chats", keyPath: \.locationStatus, request: { await $0.requestLocationPermission() }),
+        (icon: "mic.fill", title: "Microphone", description: "Record and send voice messages", keyPath: \.microphoneStatus, request: { await $0.requestMicrophonePermission() }),
+        (icon: "camera.fill", title: "Camera", description: "Scan QR codes to join rooms quickly", keyPath: \.cameraStatus, request: { await $0.requestCameraPermission() }),
+        (icon: "bell.fill", title: "Notifications", description: "Get notified when someone joins", keyPath: \.notificationStatus, request: { await $0.requestNotificationPermission() })
+    ]
+    
+    private var currentPermission: (icon: String, title: String, description: String, keyPath: KeyPath<PermissionManager, PermissionManager.PermissionStatus>, request: (PermissionManager) async -> Bool)? {
+        guard currentPermissionIndex < permissions.count else { return nil }
+        return permissions[currentPermissionIndex]
+    }
+    
+    private var currentStatus: PermissionManager.PermissionStatus {
+        guard let perm = currentPermission else { return .authorized }
+        return permissionManager[keyPath: perm.keyPath]
+    }
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            if let perm = currentPermission {
+                // Progress indicator
+                HStack(spacing: 8) {
+                    ForEach(0..<permissions.count, id: \.self) { index in
+                        Circle()
+                            .fill(index < currentPermissionIndex ? Color.green : (index == currentPermissionIndex ? Color.onboardingAccent : Color.gray.opacity(0.3)))
+                            .frame(width: 8, height: 8)
+                    }
+                    
+                    // Extra dot for local network info
+                    Circle()
+                        .fill(showingLocalNetworkInfo ? Color.onboardingAccent : Color.gray.opacity(0.3))
+                        .frame(width: 8, height: 8)
+                }
+                .padding(.bottom, 8)
+                
+                // Current permission card
+                VStack(spacing: 20) {
+                    Image(systemName: perm.icon)
+                        .font(.system(size: 64))
+                        .foregroundColor(.onboardingAccent)
+                    
+                    VStack(spacing: 8) {
+                        Text(perm.title)
+                            .font(.title2.weight(.bold))
+                        
+                        Text(perm.description)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    // Status badge
+                    HStack(spacing: 6) {
+                        Image(systemName: statusIcon(currentStatus))
+                        Text(currentStatus.displayText)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundColor(statusColor(currentStatus))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(statusColor(currentStatus).opacity(0.15))
+                    .cornerRadius(20)
+                    
+                    // Action buttons
+                    VStack(spacing: 12) {
+                        if currentStatus == .notDetermined {
+                            Button {
+                                isRequestingPermission = true
+                                Task {
+                                    _ = await perm.request(permissionManager)
+                                    isRequestingPermission = false
+                                    // Auto-advance after granting/denying
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        withAnimation {
+                                            advanceToNext()
+                                        }
+                                    }
+                                }
+                            } label: {
+                                HStack {
+                                    if isRequestingPermission {
+                                        ProgressView()
+                                            .tint(.white)
+                                    } else {
+                                        Image(systemName: "checkmark")
+                                        Text("Allow")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.onboardingAccent)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                            }
+                            .disabled(isRequestingPermission)
+                        } else if currentStatus == .denied {
+                            Button {
+                                permissionManager.openSettings()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "gear")
+                                    Text("Open Settings")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.orange)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                            }
+                        }
+                        
+                        if currentStatus != .authorized {
+                            Button {
+                                withAnimation {
+                                    advanceToNext()
+                                }
+                            } label: {
+                                Text(currentStatus == .notDetermined ? "Skip for Now" : "Continue")
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else {
+                            Button {
+                                withAnimation {
+                                    advanceToNext()
+                                }
+                            } label: {
+                                HStack {
+                                    Text("Continue")
+                                    Image(systemName: "arrow.right")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.green)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                .padding()
+                .background(Color(UIColor.secondarySystemBackground))
+                .cornerRadius(16)
+            } else {
+                // Show local network info before completion
+                if !showingLocalNetworkInfo {
+                    localNetworkInfoCard
+                } else {
+                    // All done
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundColor(.green)
+                        
+                        Text("Permissions Set!")
+                            .font(.title2.weight(.bold))
+                        
+                        Text("You can manage permissions anytime in Settings")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                }
+            }
+        }
+    }
+    
+    // Local network info card
+    private var localNetworkInfoCard: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "network")
+                .font(.system(size: 64))
+                .foregroundColor(.onboardingAccent)
+            
+            VStack(spacing: 8) {
+                Text("Local Network Access")
+                    .font(.title2.weight(.bold))
+                
+                Text("When you join a P2P room, iOS will ask for permission to find devices on your local network. This allows direct peer-to-peer connections without using external servers.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            
+            // Info badge
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle.fill")
+                Text("Asked automatically when needed")
+                    .font(.caption)
+            }
+            .foregroundColor(.onboardingAccent)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.onboardingAccent.opacity(0.15))
+            .cornerRadius(20)
+            
+            // Continue button
+            Button {
+                withAnimation {
+                    showingLocalNetworkInfo = true
+                }
+            } label: {
+                HStack {
+                    Text("Got It")
+                    Image(systemName: "arrow.right")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.onboardingAccent)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+            .padding(.horizontal)
+        }
+        .padding()
+        .background(Color(UIColor.secondarySystemBackground))
+        .cornerRadius(16)
+    }
+    
+    private func advanceToNext() {
+        if currentPermissionIndex < permissions.count {
+            currentPermissionIndex += 1
+        }
+    }
+    
+    private func statusIcon(_ status: PermissionManager.PermissionStatus) -> String {
+        switch status {
+        case .notDetermined: return "questionmark.circle"
+        case .authorized: return "checkmark.circle.fill"
+        case .denied: return "xmark.circle.fill"
+        case .restricted: return "exclamationmark.circle.fill"
+        }
+    }
+    
+    private func statusColor(_ status: PermissionManager.PermissionStatus) -> Color {
+        switch status {
+        case .notDetermined: return .orange
+        case .authorized: return .green
+        case .denied: return .red
+        case .restricted: return .gray
+        }
+    }
+}
+
+// MARK: - Supporting Views
 
 private struct PermissionCard: View {
     let icon: String
@@ -762,7 +1019,7 @@ private struct PermissionCard: View {
             HStack(spacing: 16) {
                 Image(systemName: icon)
                     .font(.title2)
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                     .frame(width: 32)
                 
                 VStack(alignment: .leading, spacing: 4) {
@@ -790,7 +1047,7 @@ private struct PermissionCard: View {
                         Text("Open Settings")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                     .padding(.vertical, 8)
                 }
             } else if status == .notDetermined {
@@ -806,7 +1063,7 @@ private struct PermissionCard: View {
                                 .font(.caption.weight(.semibold))
                         }
                     }
-                    .foregroundColor(.blue)
+                    .foregroundColor(.onboardingAccent)
                     .padding(.vertical, 8)
                 }
                 .disabled(isRequesting)

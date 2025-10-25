@@ -495,6 +495,31 @@ struct SessionsView: View {
             }
         }
         .contextMenu {
+            // Rename option
+            Button {
+                renamingSession = session
+                renameText = session.name ?? ""
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            
+            // Pin/Unpin option
+            Button {
+                if session.isPinned {
+                    chat.unpinSession(session)
+                } else {
+                    chat.pinSession(session)
+                }
+            } label: {
+                if session.isPinned {
+                    Label("Unpin", systemImage: "pin.slash")
+                } else {
+                    Label("Pin", systemImage: "pin")
+                }
+            }
+            
+            Divider()
+            
             if session.unreadNotificationCount > 0 {
                 Button {
                     chat.markSessionNotificationsAsViewed(sessionId: session.id)
@@ -508,6 +533,8 @@ struct SessionsView: View {
             } label: { 
                 Label("Settings", systemImage: "gearshape")
             }
+            
+            Divider()
             
             Button(role: .destructive) {
                 sessionToDelete = session

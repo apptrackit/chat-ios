@@ -49,6 +49,14 @@ struct FeatureAvailabilityView: View {
                 )
                 
                 FeatureStatusRow(
+                    icon: "qrcode.viewfinder",
+                    title: "QR Code Scanning",
+                    description: "Scan QR codes to join rooms quickly",
+                    isAvailable: permissionManager.canScanQRCodes,
+                    requiresPermission: "Camera"
+                )
+                
+                FeatureStatusRow(
                     icon: "bell.fill",
                     title: "Push Notifications",
                     description: "Get notified when someone joins your room",

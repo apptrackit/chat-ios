@@ -82,51 +82,53 @@ struct VoiceRecordingView: View {
     }
     
     private var modalCard: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 12) {
             Capsule()
                 .fill(.white.opacity(0.38))
-                .frame(width: 44, height: 4)
-                .padding(.top, 10)
+                .frame(width: 38, height: 4)
+                .padding(.top, 6)
             
-            VStack(spacing: 6) {
+            VStack(spacing: 3) {
                 Text(recordingState == .recording ? "Capturing voice note" : "Voice note ready")
-                    .font(.headline)
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
                 
-                Text(recordingState == .recording ? "You’re connected peer-to-peer. This note never leaves your devices unencrypted." : "Preview the waveform, make edits, or send it fully encrypted end-to-end.")
-                    .font(.footnote)
+                Text(recordingState == .recording ? "End-to-end encrypted." : "Preview or send.")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 8)
             }
-            .padding(.top, 6)
+            .padding(.top, 2)
+            
+            infoRow
             
             Text(formatDuration(displayDuration))
-                .font(.system(size: 44, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.primary)
-                .padding(.top, 2)
+                .padding(.top, 1)
             
             recorderVisualization
                 .frame(maxWidth: .infinity)
-                .frame(height: 190)
-                .padding(.top, 8)
+                .frame(height: 110)
+                .padding(.top, 2)
             
             actionSection
                 .padding(.horizontal, 2)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
+                .padding(.top, 6)
+                .padding(.bottom, 3)
         }
-        .padding(.vertical, 26)
-        .padding(.horizontal, 26)
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
         .background(GlassCardBackground(accent: accentColor))
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(.white.opacity(0.12), lineWidth: 1)
                 .blendMode(.plusLighter)
         )
-        .frame(maxWidth: 360)
-        .padding(.horizontal, 32)
+        .frame(maxWidth: 310)
+        .padding(.horizontal, 20)
     }
     
     @ViewBuilder
@@ -134,18 +136,18 @@ struct VoiceRecordingView: View {
         if recordingState == .recording {
             BreathingOrbView(level: recorder.recordingLevel, accent: accentColor)
         } else {
-            VStack(spacing: 14) {
+            VStack(spacing: 8) {
                 WaveformReviewView(
                     samples: waveformSamples,
                     progress: player.playbackProgress,
                     accent: accentColor
                 )
-                .frame(height: 88)
-                .padding(.horizontal, 8)
+                .frame(height: 56)
+                .padding(.horizontal, 4)
                 
                 HStack {
-                    Label(recordingState == .playing ? "Playing back" : "Preview ready", systemImage: recordingState == .playing ? "speaker.wave.2.fill" : "waveform.path.ecg")
-                        .font(.footnote)
+                    Label(recordingState == .playing ? "Playing" : "Preview", systemImage: recordingState == .playing ? "speaker.wave.2.fill" : "waveform.path.ecg")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                     Spacer()
                     if recordingState != .recording {
@@ -158,26 +160,26 @@ struct VoiceRecordingView: View {
                                 recordingState = .playing
                             }
                         } label: {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 3) {
                                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                                 Text(player.isPlaying ? "Pause" : "Play")
                             }
-                            .font(.footnote.weight(.medium))
+                            .font(.caption2.weight(.medium))
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(accentColor)
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 3)
             }
         }
     }
     
     private var infoRow: some View {
-        HStack(spacing: 10) {
-            InfoChip(icon: "lock.fill", text: "E2EE active", color: accentColor)
-            InfoChip(icon: "antenna.radiowaves.left.and.right", text: "Direct P2P", color: .white.opacity(0.8))
-            InfoChip(icon: recordingState == .recording ? "waveform.path" : "checkmark", text: recordingState == .recording ? "Live capture" : "Preview", color: .white.opacity(0.7))
+        HStack(spacing: 8) {
+            InfoChip(icon: "lock.fill", text: "E2EE", color: accentColor)
+            InfoChip(icon: "antenna.radiowaves.left.and.right", text: "P2P", color: .white.opacity(0.8))
+            InfoChip(icon: recordingState == .recording ? "waveform.path" : "checkmark", text: recordingState == .recording ? "Live" : "Ready", color: .white.opacity(0.7))
             Spacer()
         }
     }
@@ -384,24 +386,24 @@ struct VoiceRecordingView: View {
     
     private func actionButton(title: String?, icon: String, style: ActionStyle, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.body.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                 if let title = title {
                     Text(title)
-                        .font(.body.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                 }
             }
-            .padding(.vertical, 14)
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .background(background(for: style))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(strokeColor(for: style), lineWidth: 1)
             )
             .foregroundStyle(foreground(for: style))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .shadow(color: style == .accent ? accentColor.opacity(0.25) : .clear, radius: style == .accent ? 16 : 0, y: style == .accent ? 8 : 0)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: style == .accent ? accentColor.opacity(0.25) : .clear, radius: style == .accent ? 10 : 0, y: style == .accent ? 5 : 0)
         }
         .buttonStyle(.plain)
     }
@@ -481,15 +483,15 @@ private struct BreathingOrbView: View {
                         colors: [accent.opacity(0.5), accent.opacity(0.05)],
                         center: .center,
                         startRadius: 0,
-                        endRadius: 160
+                        endRadius: 120
                     )
                 )
                 .scaleEffect(1 + CGFloat(level) * 0.4)
-                .blur(radius: 24)
+                .blur(radius: 20)
             
             Circle()
                 .fill(.ultraThinMaterial)
-                .frame(width: 190, height: 190)
+                .frame(width: 120, height: 120)
                 .overlay {
                     Circle()
                         .stroke(
@@ -497,34 +499,34 @@ private struct BreathingOrbView: View {
                                 colors: [accent.opacity(0.9), accent.opacity(0.1), accent.opacity(0.9)],
                                 center: .center
                             ),
-                            lineWidth: 3
+                            lineWidth: 2.5
                         )
                         .opacity(0.6)
                 }
                 .overlay {
                     Circle()
                         .trim(from: 0, to: CGFloat(max(0.08, level)))
-                        .stroke(accent.opacity(0.85), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .stroke(accent.opacity(0.85), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .animation(.easeOut(duration: 0.12), value: level)
                 }
-                .shadow(color: accent.opacity(0.35), radius: 24, y: 8)
+                .shadow(color: accent.opacity(0.35), radius: 20, y: 6)
             
-            ForEach(0..<12, id: \.self) { index in
+            ForEach(0..<8, id: \.self) { index in
                 Circle()
                     .fill(accent.opacity(0.25))
-                    .frame(width: 8, height: 8)
-                    .offset(x: 78)
-                    .rotationEffect(.degrees(Double(index) / 12 * 360))
+                    .frame(width: 6, height: 6)
+                    .offset(x: 50)
+                    .rotationEffect(.degrees(Double(index) / 8 * 360))
                     .blur(radius: 0.5)
             }
             
             Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 60, weight: .bold))
+                .font(.system(size: 48, weight: .bold))
                 .foregroundStyle(accent.opacity(0.85))
-                .shadow(color: accent.opacity(0.45), radius: 16, y: 6)
+                .shadow(color: accent.opacity(0.45), radius: 14, y: 5)
         }
-        .frame(width: 210, height: 210)
+        .frame(width: 140, height: 140)
     }
 }
 
@@ -596,8 +598,8 @@ private struct InfoChip: View {
         }
         .font(.caption2.weight(.semibold))
         .foregroundStyle(color)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
         .background(color.opacity(0.12), in: Capsule(style: .continuous))
     }
 }

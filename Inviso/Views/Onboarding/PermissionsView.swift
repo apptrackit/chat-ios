@@ -51,6 +51,19 @@ struct PermissionsView: View {
                 )
                 
                 PermissionRow(
+                    icon: "camera.fill",
+                    iconColor: .purple,
+                    title: "Camera",
+                    description: "Scan QR codes to join rooms",
+                    status: permissionManager.cameraStatus,
+                    feature: "QR Code Scanning",
+                    isEnabled: permissionManager.canScanQRCodes,
+                    isRequesting: isRequestingPermission,
+                    onRequest: requestCameraPermission,
+                    onOpenSettings: permissionManager.openSettings
+                )
+                
+                PermissionRow(
                     icon: "bell.fill",
                     iconColor: .orange,
                     title: "Notifications",
@@ -137,6 +150,15 @@ struct PermissionsView: View {
         isRequestingPermission = true
         Task {
             _ = await permissionManager.requestNotificationPermission()
+            isRequestingPermission = false
+        }
+    }
+    
+    private func requestCameraPermission() {
+        guard permissionManager.cameraStatus == .notDetermined else { return }
+        isRequestingPermission = true
+        Task {
+            _ = await permissionManager.requestCameraPermission()
             isRequestingPermission = false
         }
     }

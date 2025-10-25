@@ -22,6 +22,7 @@ final class PermissionManager: ObservableObject {
     @Published var locationStatus: PermissionStatus = .notDetermined
     @Published var microphoneStatus: PermissionStatus = .notDetermined
     @Published var notificationStatus: PermissionStatus = .notDetermined
+    @Published var cameraStatus: PermissionStatus = .notDetermined
     
     // MARK: - Permission Status
     
@@ -68,6 +69,10 @@ final class PermissionManager: ObservableObject {
         notificationStatus.isGranted
     }
     
+    var canScanQRCodes: Bool {
+        cameraStatus.isGranted
+    }
+    
     // MARK: - Initialization
     
     private init() {
@@ -83,6 +88,7 @@ final class PermissionManager: ObservableObject {
         await refreshLocationPermission()
         await refreshMicrophonePermission()
         await refreshNotificationPermission()
+        await refreshCameraPermission()
     }
     
     /// Check location permission status
@@ -135,17 +141,40 @@ final class PermissionManager: ObservableObject {
         }
     }
     
+    /// Check camera permission status
+    func refreshCameraPermission() async {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .notDetermined:
+            cameraStatus = .notDetermined
+        case .restricted:
+            cameraStatus = .restricted
+        case .denied:
+            cameraStatus = .denied
+        case .authorized:
+            cameraStatus = .authorized
+        @unknown default:
+            cameraStatus = .notDetermined
+        }
+    }
+    
     // MARK: - Permission Requests
     
     /// Request location permission
     func requestLocationPermission() async -> Bool {
         LocationManager.shared.requestPermission()
         
-        // Wait a bit for the permission dialog
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        // Wait for the permission dialog and response
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
         
-        // Refresh status
-        await refreshLocationPermission()
+        // Refresh status multiple times to catch the change
+        for _ in 0..<3 {
+            await refreshLocationPermission()
+            if locationStatus.isGranted {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        }
+        
         return locationStatus.isGranted
     }
     
@@ -166,6 +195,18 @@ final class PermissionManager: ObservableObject {
         } catch {
             await refreshNotificationPermission()
             return false
+        }
+    }
+    
+    /// Request camera permission
+    func requestCameraPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                Task { @MainActor in
+                    await self.refreshCameraPermission()
+                    continuation.resume(returning: granted)
+                }
+            }
         }
     }
     

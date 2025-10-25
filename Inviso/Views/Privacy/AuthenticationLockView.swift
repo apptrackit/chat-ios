@@ -2,8 +2,8 @@ import SwiftUI
 
 struct AuthenticationLockView: View {
     @ObservedObject var manager: AppSecurityManager
-    @State private var passphrase = ""
-    @FocusState private var isPassphraseFocused: Bool
+    @State private var passcode = ""
+    @FocusState private var isPasscodeFocused: Bool
 
     private var biometricLabel: String {
         switch manager.biometricCapability {
@@ -36,34 +36,57 @@ struct AuthenticationLockView: View {
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
-
-                if manager.shouldPromptBiometric {
+                
+                // Show Face ID button if available and not attempting
+                if manager.shouldPromptBiometric && !manager.isAttemptingBiometric {
                     Button {
                         manager.triggerBiometricIfNeeded()
                     } label: {
                         HStack {
                             Image(systemName: manager.biometricCapability.systemImageName)
                             Text(biometricLabel)
-                            if manager.isAttemptingBiometric {
-                                Spacer(minLength: 12)
-                                ProgressView()
-                            }
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(manager.isAttemptingBiometric)
+                }
+                
+                // Show biometric progress if attempting
+                if manager.isAttemptingBiometric {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Image(systemName: manager.biometricCapability.systemImageName)
+                            Text("Authenticating...")
+                            Spacer(minLength: 12)
+                            ProgressView()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue.opacity(0.2))
+                        .cornerRadius(12)
+                        
+                        Text("Look at your device to unlock")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
-                if manager.requiresPassphraseEntry {
+                // Show passcode field only if:
+                // 1. Passcode is required AND
+                // 2. (Biometric not available OR biometric already attempted/failed OR explicitly requiring passcode entry)
+                if manager.requiresPassphraseEntry && (!manager.shouldPromptBiometric || !manager.isAttemptingBiometric) {
                     VStack(alignment: .leading, spacing: 12) {
-                        SecureField("Passphrase", text: $passphrase)
-                            .focused($isPassphraseFocused)
+                        SecureField("Passcode", text: $passcode)
+                            .keyboardType(.numberPad)
+                            .focused($isPasscodeFocused)
                             .textContentType(.password)
                             .submitLabel(.done)
-                            .onSubmit(submitPassphrase)
+                            .onSubmit(submitPasscode)
+                            .padding()
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(12)
 
-                        Button("Unlock with Passphrase", action: submitPassphrase)
+                        Button("Unlock with Passcode", action: submitPasscode)
                             .buttonStyle(.bordered)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -76,12 +99,12 @@ struct AuthenticationLockView: View {
                 }
 
                 if manager.requiresPassphraseEntry, manager.shouldPromptBiometric {
-                    Text("Both biometric verification and the passphrase are required.")
+                    Text("Use \(manager.biometricCapability.localizedName) or enter your passcode to unlock.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 } else if manager.requiresPassphraseEntry {
-                    Text("Enter your passphrase to unlock the app.")
+                    Text("Enter your passcode to unlock the app.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -93,24 +116,33 @@ struct AuthenticationLockView: View {
             .padding(.horizontal, 32)
         }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                if manager.requiresPassphraseEntry {
-                    isPassphraseFocused = true
+            // Don't auto-focus passcode if biometric is available and will be attempted
+            if manager.requiresPassphraseEntry && !manager.shouldPromptBiometric {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isPasscodeFocused = true
                 }
             }
         }
         .onChange(of: manager.requiresPassphraseEntry) { _, requires in
-            if requires {
-                passphrase = ""
-                isPassphraseFocused = true
+            if requires && !manager.shouldPromptBiometric {
+                passcode = ""
+                isPasscodeFocused = true
+            }
+        }
+        .onChange(of: manager.isAttemptingBiometric) { _, attempting in
+            // When biometric attempt finishes, auto-focus passcode if still needed
+            if !attempting && manager.requiresPassphraseEntry {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isPasscodeFocused = true
+                }
             }
         }
     }
 
-    private func submitPassphrase() {
-        guard passphrase.isEmpty == false else { return }
-        manager.submitPassphrase(passphrase)
-        passphrase.removeAll()
+    private func submitPasscode() {
+        guard passcode.isEmpty == false else { return }
+        manager.submitPassphrase(passcode)
+        passcode.removeAll()
     }
 }
 
