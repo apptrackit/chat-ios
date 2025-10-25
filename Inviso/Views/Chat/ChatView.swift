@@ -8,6 +8,8 @@ struct ChatView: View {
     @State private var showLeaveConfirm = false
     @State private var showConnectionCard = false
     @State private var showRoomSettings = false
+    @State private var showLocationPicker = false
+    @State private var showVoiceRecorder = false
 
     var body: some View {
     ZStack(alignment: .center) {
@@ -24,7 +26,18 @@ struct ChatView: View {
                                     .padding(.vertical, 2)
                                     .id(msg.id)
                                     .padding(.horizontal)
+                            } else if msg.isLocationMessage, let location = msg.locationData {
+                                // Location message
+                                let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
+                                LocationMessageBubble(location: location, isFromSelf: msg.isFromSelf, showTime: showTime, timestamp: msg.timestamp)
+                                    .id(msg.id)
+                            } else if msg.isVoiceMessage, let voice = msg.voiceData {
+                                // Voice message
+                                let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
+                                VoiceMessageBubble(voice: voice, isFromSelf: msg.isFromSelf, showTime: showTime, timestamp: msg.timestamp)
+                                    .id(msg.id)
                             } else {
+                                // Text message
                                 let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
                                 ChatBubble(message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp), showTime: showTime)
                                     .id(msg.id)
@@ -158,12 +171,61 @@ struct ChatView: View {
                 }
             }
         }
+        .sheet(isPresented: $showLocationPicker) {
+            LocationPickerView { location in
+                chat.sendLocation(location)
+            }
+        }
+        .overlay {
+            if showVoiceRecorder {
+                VoiceRecordingView { voice in
+                    chat.sendVoice(voice)
+                } onClose: {
+                    showVoiceRecorder = false
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                .zIndex(3)
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showVoiceRecorder)
         .background(DisablePopGesture())
         .safeAreaInset(edge: .bottom) {
             Group {
                 let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 let canSend = chat.isP2PConnected && chat.isEncryptionReady
                 HStack(spacing: 8) {
+                    if !hasText {
+                        // Voice message button (only when no text)
+                        Button {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                showVoiceRecorder = true
+                            }
+                        } label: {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                                .frame(width: 20, height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!canSend)
+                        .opacity(canSend ? 1 : 0.4)
+                        .transition(.scale.combined(with: .opacity))
+                        
+                        // Location sharing button (only when no text)
+                        Button {
+                            showLocationPicker = true
+                        } label: {
+                            Image(systemName: "location.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                                .frame(width: 20, height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!canSend)
+                        .opacity(canSend ? 1 : 0.4)
+                        .transition(.scale.combined(with: .opacity))
+                    }
+                    
                     SearchBarField(
                         text: $input,
                         placeholder: canSend ? "Message" : chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",
