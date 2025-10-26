@@ -255,11 +255,12 @@ final class MessageStorageManager {
     }
     
     /// Unlock storage with biometric authentication (Face ID / Touch ID)
-    func unlockWithBiometric() async throws {
+    /// - Parameter authenticatedContext: Optional pre-authenticated LAContext to avoid double prompts
+    func unlockWithBiometric(authenticatedContext: LAContext? = nil) async throws {
         print("[MessageStorage] Unlocking storage with biometric...")
         
-        // Retrieve wrapped key from Keychain (triggers biometric prompt)
-        guard let wrappedKeyData = try retrieveBiometricWrappedKey() else {
+        // Retrieve wrapped key from Keychain (uses provided context or creates new one)
+        guard let wrappedKeyData = try retrieveBiometricWrappedKey(context: authenticatedContext) else {
             throw MessageStorageError.biometricFailed
         }
         
@@ -607,17 +608,24 @@ final class MessageStorageManager {
         print("[MessageStorage] ✅ Stored biometric-wrapped key")
     }
     
-    private func retrieveBiometricWrappedKey() throws -> Data? {
-        // Create LAContext for authentication
-        let context = LAContext()
-        context.localizedReason = "Unlock encrypted message storage"
+    private func retrieveBiometricWrappedKey(context: LAContext? = nil) throws -> Data? {
+        // Use provided context or create a new one
+        let authContext: LAContext
+        if let providedContext = context {
+            authContext = providedContext
+            print("[MessageStorage] Using pre-authenticated context (no double prompt)")
+        } else {
+            authContext = LAContext()
+            authContext.localizedReason = "Unlock encrypted message storage"
+            print("[MessageStorage] Creating new authentication context")
+        }
         
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainServiceName,
             kSecAttrAccount as String: biometricWrappedKeyAccount,
             kSecReturnData as String: true,
-            kSecUseAuthenticationContext as String: context
+            kSecUseAuthenticationContext as String: authContext
         ]
         
         var item: CFTypeRef?
