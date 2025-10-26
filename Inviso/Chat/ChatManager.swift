@@ -51,6 +51,10 @@ class ChatManager: NSObject, ObservableObject {
     private var currentSessionKeyId: UUID?
     // Queue for received key_exchange messages before our keypair is ready
     private var pendingPeerPublicKey: (publicKey: String, sessionId: String)?
+    
+    // Message storage components
+    private let storage = MessageStorageManager.shared
+    private let cleanup = MessageCleanupService.shared
 
     // State
     private var clientId: String?
@@ -81,6 +85,12 @@ class ChatManager: NSObject, ObservableObject {
         setupAppLifecycleObservers()
         setupPushNotificationObservers()
         
+        // Start automatic message cleanup
+        cleanup.startPeriodicCleanup()
+        
+        // Initialize storage with passphrase if available
+        initializeStorageIfNeeded()
+        
         // Sync pending notifications from Notification Service Extension
         syncPendingNotifications()
         
@@ -95,6 +105,22 @@ class ChatManager: NSObject, ObservableObject {
         // Note: disconnect/close are @MainActor isolated but deinit is nonisolated.
         // This is acceptable for cleanup as the object is being destroyed.
         // The methods will be called synchronously on deallocation.
+    }
+    
+    // MARK: - Storage Initialization
+    
+    private func initializeStorageIfNeeded() {
+        // Check if user has set up a passphrase
+        guard PassphraseManager.shared.hasPassphrase else {
+            print("ℹ️ No passphrase set - message storage disabled")
+            return
+        }
+        
+        // Try to unlock storage with existing passphrase
+        // This requires the PassphraseManager to provide access to the passphrase
+        // Since PassphraseManager doesn't expose the passphrase directly (for security),
+        // storage will be unlocked when user authenticates via biometric or manual entry
+        print("ℹ️ Passphrase exists - storage will unlock after authentication")
     }
 
     // Public API
@@ -143,6 +169,39 @@ class ChatManager: NSObject, ObservableObject {
         self.roomId = roomId
         // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
         
+        // Load stored messages if storage is unlocked and session has non-ephemeral lifetime
+        print("🔍 joinRoom - checking message loading conditions:")
+        print("  - Found session: \(sessions.first(where: { $0.roomId == roomId }) != nil)")
+        if let session = sessions.first(where: { $0.roomId == roomId }) {
+            print("  - Session lifetime: \(session.messageLifetime)")
+            print("  - Is ephemeral: \(session.messageLifetime == .ephemeral)")
+        }
+        print("  - Storage unlocked: \(storage.isUnlocked)")
+        
+        if let session = sessions.first(where: { $0.roomId == roomId }),
+           session.messageLifetime != .ephemeral,
+           storage.isUnlocked {
+            do {
+                let storedMessages = try storage.loadMessages(for: session.id)
+                print("📦 Found \(storedMessages.count) stored messages in database")
+                // Decrypt and convert to ChatMessage
+                var loadedCount = 0
+                for storedMessage in storedMessages {
+                    if let chatMessage = try? storage.decryptMessage(storedMessage) {
+                        messages.append(chatMessage)
+                        loadedCount += 1
+                    } else {
+                        print("⚠️ Failed to decrypt stored message: \(storedMessage.id)")
+                    }
+                }
+                print("📦 Successfully loaded \(loadedCount) stored messages for session")
+            } catch {
+                print("⚠️ Failed to load stored messages: \(error)")
+            }
+        } else {
+            print("⚠️ Skipping message load - conditions not met")
+        }
+        
         // Find the session's ephemeral device ID to send to backend for push notification matching
         let deviceId = sessions.first(where: { $0.roomId == roomId })?.ephemeralDeviceId
         
@@ -162,6 +221,14 @@ class ChatManager: NSObject, ObservableObject {
             wasInRoomBeforeDisconnect = nil
         }
         guard !roomId.isEmpty else { return }
+        
+        // Delete stored messages for ephemeral sessions
+        if let session = sessions.first(where: { $0.roomId == roomId }),
+           session.messageLifetime == .ephemeral {
+            cleanup.deleteSessionMessages(session.id)
+            print("🗑️ Deleted ephemeral messages for session")
+        }
+        
     messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
@@ -246,7 +313,38 @@ class ChatManager: NSObject, ObservableObject {
             // Send encrypted binary data over DataChannel
             let ok = pcm.sendData(jsonData)
             if ok {
-                messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true))
+                var message = ChatMessage(text: text, timestamp: Date(), isFromSelf: true)
+                
+                // Save message if storage is unlocked and session has non-ephemeral lifetime
+                if let session = activeSession,
+                   session.messageLifetime != .ephemeral,
+                   storage.isUnlocked {
+                    do {
+                        // Create storage config
+                        let config = MessageStorageConfig(
+                            sessionId: session.id,
+                            lifetime: session.messageLifetime,
+                            agreedAt: session.lifetimeAgreedAt ?? Date(),
+                            agreedByBoth: session.lifetimeAgreedByBoth
+                        )
+                        
+                        try storage.saveMessage(message, sessionId: session.id, config: config)
+                        
+                        // Update message metadata for UI display
+                        message.savedLocally = true
+                        message.lifetime = session.messageLifetime
+                        if let seconds = session.messageLifetime.seconds {
+                            message.expiresAt = Date().addingTimeInterval(seconds)
+                        }
+                        
+                        print("💾 Saved message to storage")
+                    } catch {
+                        print("⚠️ Failed to save message: \(error)")
+                    }
+                }
+                
+                messages.append(message)
+                
                 // Update activity for active session
                 if let sessionId = activeSessionId {
                     updateSessionActivity(sessionId)
@@ -2131,12 +2229,14 @@ extension ChatManager: PeerConnectionManagerDelegate {
                 msg.locationData = locationData
                 messages.append(msg)
                 print("📍 Received location: \(locationData.latitude), \(locationData.longitude)")
+                // Note: Location messages not saved to storage yet
             } else if let voiceData = VoiceData.fromJSONString(plaintext) {
                 // Display as voice message
                 var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
                 msg.voiceData = voiceData
                 messages.append(msg)
                 print("🎤 Received voice message: \(voiceData.duration)s")
+                // Note: Voice messages not saved to storage yet
             } else if let jsonData = plaintext.data(using: .utf8) {
                 // Try to decode lifetime messages
                 if let proposal = try? decoder.decode(LifetimeProposalMessage.self, from: jsonData) {
@@ -2147,11 +2247,71 @@ extension ChatManager: PeerConnectionManagerDelegate {
                     handleLifetimeReject(reject)
                 } else {
                     // Display as text message
-                    messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+                    var message = ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false)
+                    
+                    // Save message if storage is unlocked and session has non-ephemeral lifetime
+                    if let session = activeSession,
+                       session.messageLifetime != .ephemeral,
+                       storage.isUnlocked {
+                        do {
+                            // Create storage config
+                            let config = MessageStorageConfig(
+                                sessionId: session.id,
+                                lifetime: session.messageLifetime,
+                                agreedAt: session.lifetimeAgreedAt ?? Date(),
+                                agreedByBoth: session.lifetimeAgreedByBoth
+                            )
+                            
+                            try storage.saveMessage(message, sessionId: session.id, config: config)
+                            
+                            // Update message metadata for UI display
+                            message.savedLocally = true
+                            message.lifetime = session.messageLifetime
+                            if let seconds = session.messageLifetime.seconds {
+                                message.expiresAt = Date().addingTimeInterval(seconds)
+                            }
+                            
+                            print("💾 Saved received message to storage")
+                        } catch {
+                            print("⚠️ Failed to save received message: \(error)")
+                        }
+                    }
+                    
+                    messages.append(message)
                 }
             } else {
                 // Display as text message
-                messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+                var message = ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false)
+                
+                // Save message if storage is unlocked and session has non-ephemeral lifetime
+                if let session = activeSession,
+                   session.messageLifetime != .ephemeral,
+                   storage.isUnlocked {
+                    do {
+                        // Create storage config
+                        let config = MessageStorageConfig(
+                            sessionId: session.id,
+                            lifetime: session.messageLifetime,
+                            agreedAt: session.lifetimeAgreedAt ?? Date(),
+                            agreedByBoth: session.lifetimeAgreedByBoth
+                        )
+                        
+                        try storage.saveMessage(message, sessionId: session.id, config: config)
+                        
+                        // Update message metadata for UI display
+                        message.savedLocally = true
+                        message.lifetime = session.messageLifetime
+                        if let seconds = session.messageLifetime.seconds {
+                            message.expiresAt = Date().addingTimeInterval(seconds)
+                        }
+                        
+                        print("💾 Saved received message to storage")
+                    } catch {
+                        print("⚠️ Failed to save received message: \(error)")
+                    }
+                }
+                
+                messages.append(message)
             }
             
             // Update activity for active session

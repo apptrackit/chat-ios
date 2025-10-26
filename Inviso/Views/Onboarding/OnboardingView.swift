@@ -858,6 +858,10 @@ struct OnboardingView: View {
     private func savePassphrase() {
         do {
             try PassphraseManager.shared.setPassphrase(passcode)
+            
+            // Also set up message storage encryption with the same passphrase
+            try MessageStorageManager.shared.setupStoragePassphrase(passcode)
+            print("🔐 Message storage configured with passphrase")
         } catch {
             passcodeError = "Failed to save passcode. Please try again."
         }

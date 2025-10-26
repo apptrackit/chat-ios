@@ -171,7 +171,17 @@ final class MessageStorageManager {
     func setupStoragePassphrase(_ passphrase: String) throws {
         print("[MessageStorage] Setting up storage passphrase...")
         
-        // Generate random salt
+        // Check if salt already exists (storage already set up)
+        if let existingSalt = keychain.data(for: masterKeySaltAccount) {
+            print("[MessageStorage] ⚠️ Storage already configured - use unlockWithPassphraseSync() instead")
+            // Just unlock with existing salt instead of creating new one
+            let masterKey = try deriveMasterKey(from: passphrase, salt: existingSalt)
+            cachedMasterKey = masterKey
+            print("[MessageStorage] ✅ Storage unlocked with existing configuration")
+            return
+        }
+        
+        // First time setup - generate new salt
         let salt = generateRandomBytes(count: saltSize)
         
         // Derive master key from passphrase using PBKDF2
@@ -186,7 +196,7 @@ final class MessageStorageManager {
         // Cache in memory
         cachedMasterKey = masterKey
         
-        print("[MessageStorage] ✅ Storage passphrase configured")
+        print("[MessageStorage] ✅ Storage passphrase configured (first time)")
     }
     
     /// Change storage passphrase (re-encrypts all stored messages)
@@ -221,7 +231,13 @@ final class MessageStorageManager {
     }
     
     /// Unlock storage with passphrase
+    /// Unlock storage with passphrase (async version)
     func unlockWithPassphrase(_ passphrase: String) async throws {
+        try unlockWithPassphraseSync(passphrase)
+    }
+    
+    /// Unlock storage with passphrase (synchronous version)
+    func unlockWithPassphraseSync(_ passphrase: String) throws {
         print("[MessageStorage] Unlocking storage with passphrase...")
         
         guard let salt = keychain.data(for: masterKeySaltAccount) else {

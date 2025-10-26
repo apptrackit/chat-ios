@@ -64,6 +64,16 @@ final class AppSecurityManager: ObservableObject {
         if passphraseManager.validate(passphrase: trimmed) {
             passphraseSatisfied = true
             passphraseError = nil
+            
+            print("🔐 Passphrase validated - attempting to unlock storage...")
+            // Unlock message storage with the validated passphrase
+            do {
+                try MessageStorageManager.shared.unlockWithPassphraseSync(trimmed)
+                print("🔓 Message storage unlocked - isUnlocked: \(MessageStorageManager.shared.isUnlocked)")
+            } catch {
+                print("⚠️ Failed to unlock message storage: \(error)")
+            }
+            
             updateLockState()
         } else {
             passphraseError = "Incorrect passphrase."
@@ -238,24 +248,24 @@ final class AppSecurityManager: ObservableObject {
         let primary = await BiometricAuth.shared.authenticateWithBiometrics(reason: Self.unlockReason)
         switch primary {
         case .success:
-            await MainActor.run { self.finalizeBiometricResult(.success) }
+            await finalizeBiometricResult(.success)
         case .cancelled:
-            await MainActor.run { self.finalizeBiometricResult(.cancelled) }
+            await finalizeBiometricResult(.cancelled)
         case .fallback:
             let passcodeResult = await BiometricAuth.shared.authenticateAllowingDevicePasscode(
                 reason: Self.unlockReason,
                 fallbackTitle: "Enter Passcode"
             )
-            await MainActor.run { self.finalizeBiometricResult(passcodeResult) }
+            await finalizeBiometricResult(passcodeResult)
         case .failed(let code):
             if code == .biometryLockout {
                 let passcodeResult = await BiometricAuth.shared.authenticateAllowingDevicePasscode(
                     reason: Self.unlockReason,
                     fallbackTitle: "Enter Passcode"
                 )
-                await MainActor.run { self.finalizeBiometricResult(passcodeResult, lockedOut: true) }
+                await finalizeBiometricResult(passcodeResult, lockedOut: true)
             } else {
-                await MainActor.run { self.finalizeBiometricResult(.failed(code)) }
+                await finalizeBiometricResult(.failed(code))
             }
         }
         await MainActor.run {
@@ -265,11 +275,21 @@ final class AppSecurityManager: ObservableObject {
     }
 
     @MainActor
-    private func finalizeBiometricResult(_ result: BiometricAuthResult, lockedOut: Bool = false) {
+    private func finalizeBiometricResult(_ result: BiometricAuthResult, lockedOut: Bool = false) async {
         switch result {
         case .success:
             biometricSatisfied = true
             passphraseError = nil
+            
+            print("🔐 Biometric validated - attempting to unlock storage...")
+            // Unlock message storage with biometric - MUST complete before unlock
+            do {
+                try await MessageStorageManager.shared.unlockWithBiometric()
+                print("🔓 Message storage unlocked with biometric - isUnlocked: \(MessageStorageManager.shared.isUnlocked)")
+            } catch {
+                print("⚠️ Failed to unlock message storage with biometric: \(error)")
+                // Even if storage unlock fails, allow app unlock (storage just won't work)
+            }
         case .fallback:
             break
         case .cancelled:
