@@ -8,7 +8,7 @@
 import SwiftUI
 
 extension Color {
-    static let onboardingAccent = Color(red: 0x25 / 255.0, green: 0x96 / 255.0, blue: 0xbe / 255.0)
+    static let onboardingAccent = Color(red: 0x1a / 255.0, green: 0x73 / 255.0, blue: 0x99 / 255.0)
 }
 
 struct OnboardingView: View {
@@ -20,9 +20,56 @@ struct OnboardingView: View {
     @State private var passcode = ""
     @State private var confirmPasscode = ""
     @State private var passcodeError: String?
+    @State private var passcodeStep: PasscodeStep = .enter
     @State private var serverHost = ServerConfig.shared.host
     @State private var enableBiometric = false
     @State private var isRequestingPermission = false
+    @State private var serverCheckStatus: ServerCheckStatus = .idle
+    @State private var serverCheckTask: Task<Void, Never>?
+    @State private var permissionsCompleted = false
+    
+    enum PasscodeStep {
+        case enter
+        case confirm
+    }
+    
+    enum ServerCheckStatus {
+        case idle
+        case checking
+        case online
+        case offline
+        case invalid
+        
+        var icon: String {
+            switch self {
+            case .idle: return "circle"
+            case .checking: return "circle.dotted"
+            case .online: return "checkmark.circle.fill"
+            case .offline: return "exclamationmark.circle.fill"
+            case .invalid: return "xmark.circle.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .idle: return .secondary
+            case .checking: return .onboardingAccent
+            case .online: return .green
+            case .offline: return .orange
+            case .invalid: return .red
+            }
+        }
+        
+        var text: String {
+            switch self {
+            case .idle: return "Not checked"
+            case .checking: return "Checking..."
+            case .online: return "Server online"
+            case .offline: return "Server offline (can still proceed)"
+            case .invalid: return "Invalid address"
+            }
+        }
+    }
     
     @FocusState private var passcodeFieldFocused: Bool
     @FocusState private var confirmFieldFocused: Bool
@@ -61,7 +108,7 @@ struct OnboardingView: View {
         ZStack {
             // Background gradient
             LinearGradient(
-                colors: [Color.onboardingAccent.opacity(0.15), Color.purple.opacity(0.1)],
+                colors: [Color(white: 0.05), Color.black],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -118,13 +165,7 @@ struct OnboardingView: View {
                     .frame(height: 6)
                 
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.onboardingAccent, Color.purple],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
+                    .fill(Color.onboardingAccent)
                     .frame(width: geometry.size.width * progress, height: 6)
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: currentStep)
             }
@@ -162,18 +203,28 @@ struct OnboardingView: View {
         VStack(spacing: 32) {
             Spacer()
             
-            Image(systemName: "lock.shield.fill")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 120, height: 120)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            // App Icon/Logo
+            ZStack {
+                // Background circle
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.onboardingAccent, Color.onboardingAccent.opacity(0.7)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .padding(.bottom, 16)
+                    .frame(width: 120, height: 120)
+                    .shadow(color: Color.onboardingAccent.opacity(0.4), radius: 20, y: 10)
+                
+                // Lock icon
+                Image(systemName: "lock.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 60, height: 60)
+                    .foregroundStyle(.white)
+            }
+            .padding(.bottom, 16)
             
             Text("Welcome to Inviso")
                 .font(.system(size: 36, weight: .bold))
@@ -186,9 +237,9 @@ struct OnboardingView: View {
             
             VStack(alignment: .leading, spacing: 16) {
                 FeatureRow(icon: "lock.fill", text: "End-to-end encrypted messaging")
-                FeatureRow(icon: "eye.slash.fill", text: "No message history stored")
+                FeatureRow(icon: "eye.slash.fill", text: "No data stored on servers")
                 FeatureRow(icon: "network", text: "Direct peer-to-peer connections")
-                FeatureRow(icon: "timer", text: "Messages expire after 24 hours")
+                FeatureRow(icon: "timer", text: "Ephemeral sessions, no history")
             }
             .padding(.top, 24)
             
@@ -207,18 +258,13 @@ struct OnboardingView: View {
                 
                 Text("Permissions")
                     .font(.largeTitle.weight(.bold))
-                
-                Text("Grant permissions one by one to enable features. You can skip any permission and enable it later.")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.bottom, 8)
             
             SequentialPermissionFlow(
                 permissionManager: permissionManager,
-                isRequestingPermission: $isRequestingPermission
+                isRequestingPermission: $isRequestingPermission,
+                allPermissionsCompleted: $permissionsCompleted
             )
             
             Text("You can always change these later in Settings")
@@ -241,61 +287,97 @@ struct OnboardingView: View {
                 Text("Server Configuration")
                     .font(.largeTitle.weight(.bold))
                 
-                Text("Enter your signaling server address. Use the default or specify your own.")
+                Text("Configure the signaling server for peer discovery. You can use the default or specify your own.")
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.bottom, 8)
             
             VStack(alignment: .leading, spacing: 12) {
-                Text("Server Address")
-                    .font(.headline)
-                
                 HStack {
-                    TextField("Server host", text: $serverHost)
-                        .textContentType(.URL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .focused($serverFieldFocused)
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
+                    Text("Server Address")
+                        .font(.headline)
                     
+                    Spacer()
+                    
+                    // Server check button and status
                     Button {
-                        serverHost = "chat.ballabotond.com"
+                        Task {
+                            await checkServer(serverHost)
+                        }
                     } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .foregroundColor(.onboardingAccent)
-                            .padding()
-                            .background(Color(UIColor.secondarySystemBackground))
-                            .cornerRadius(12)
+                        Image(systemName: serverCheckStatus.icon)
+                            .foregroundColor(serverCheckStatus.color)
+                            .font(.title3)
                     }
                 }
                 
-                Text("Default: chat.ballabotond.com")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                TextField("server.example.com", text: $serverHost)
+                    .keyboardType(.URL)
+                    .autocapitalization(.none)
+                    .autocorrectionDisabled()
+                    .focused($serverFieldFocused)
+                    .padding()
+                    .background(Color(UIColor.secondarySystemBackground))
+                    .cornerRadius(12)
+                    .onChange(of: serverHost) { oldValue, newValue in
+                        // Cancel previous check task
+                        serverCheckTask?.cancel()
+                        
+                        // Debounce server check
+                        serverCheckTask = Task {
+                            try? await Task.sleep(for: .seconds(1))
+                            if !Task.isCancelled {
+                                await checkServer(newValue)
+                            }
+                        }
+                    }
+                
+                // Status text
+                if serverCheckStatus != .idle {
+                    HStack(spacing: 6) {
+                        Image(systemName: serverCheckStatus.icon)
+                        Text(serverCheckStatus.text)
+                            .font(.caption)
+                    }
+                    .foregroundColor(serverCheckStatus.color)
+                }
+                
+                Button {
+                    serverConfig.resetToDefault()
+                    serverHost = serverConfig.host
+                } label: {
+                    Text("Use Default")
+                        .font(.subheadline)
+                        .foregroundColor(.onboardingAccent)
+                }
             }
             .padding(.horizontal, 4)
             
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Image(systemName: "info.circle")
-                        .foregroundColor(.onboardingAccent)
-                    Text("About the Server")
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.blue)
+                    Text("About Servers")
                         .font(.headline)
                 }
                 
-                Text("The server is only used for initial peer discovery. All messages are sent directly between devices using end-to-end encryption.")
-                    .font(.caption)
+                Text("The server is only used for initial peer discovery. All messages are end-to-end encrypted and sent directly between devices.")
+                    .font(.callout)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding()
-            .background(Color.onboardingAccent.opacity(0.1))
+            .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(12)
+        }
+        .onAppear {
+            // Auto-check server when user reaches this step
+            Task {
+                await checkServer(serverHost)
+            }
         }
     }
     
@@ -308,61 +390,66 @@ struct OnboardingView: View {
                     .font(.system(size: 64))
                     .foregroundColor(.onboardingAccent)
                 
-                Text("Set Passcode")
+                Text(passcodeStep == .enter ? "Set Passcode" : "Confirm Passcode")
                     .font(.largeTitle.weight(.bold))
                 
-                Text("Create a numeric passcode to protect your app. This is required and cannot be recovered if forgotten.")
+                Text(passcodeStep == .enter 
+                     ? "Create a numeric passcode to protect your app"
+                     : "Re-enter your passcode to confirm")
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.bottom, 8)
             
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Passcode")
-                        .font(.headline)
-                    
-                    SecureField("Enter passcode (4-10 digits)", text: $passcode)
-                        .keyboardType(.numberPad)
-                        .textContentType(.newPassword)
-                        .focused($passcodeFieldFocused)
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .onChange(of: passcode) { _, newValue in
-                            // Limit to 10 digits and numbers only
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered.count > 10 {
-                                passcode = String(filtered.prefix(10))
-                            } else if filtered != newValue {
-                                passcode = filtered
+            VStack(spacing: 16) {
+                // Single field that switches between enter and confirm
+                if passcodeStep == .enter {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Passcode")
+                            .font(.headline)
+                        
+                        SecureField("Enter passcode (4-10 digits)", text: $passcode)
+                            .keyboardType(.numberPad)
+                            .textContentType(.newPassword)
+                            .focused($passcodeFieldFocused)
+                            .padding()
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(12)
+                            .onChange(of: passcode) { _, newValue in
+                                // Limit to 10 digits and numbers only
+                                let filtered = newValue.filter { $0.isNumber }
+                                if filtered.count > 10 {
+                                    passcode = String(filtered.prefix(10))
+                                } else if filtered != newValue {
+                                    passcode = filtered
+                                }
+                                passcodeError = nil
                             }
-                            passcodeError = nil
-                        }
-                }
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Confirm Passcode")
-                        .font(.headline)
-                    
-                    SecureField("Re-enter passcode", text: $confirmPasscode)
-                        .keyboardType(.numberPad)
-                        .textContentType(.newPassword)
-                        .focused($confirmFieldFocused)
-                        .padding()
-                        .background(Color(UIColor.secondarySystemBackground))
-                        .cornerRadius(12)
-                        .onChange(of: confirmPasscode) { _, newValue in
-                            // Limit to 10 digits and numbers only
-                            let filtered = newValue.filter { $0.isNumber }
-                            if filtered.count > 10 {
-                                confirmPasscode = String(filtered.prefix(10))
-                            } else if filtered != newValue {
-                                confirmPasscode = filtered
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Confirm Passcode")
+                            .font(.headline)
+                        
+                        SecureField("Re-enter passcode", text: $confirmPasscode)
+                            .keyboardType(.numberPad)
+                            .textContentType(.newPassword)
+                            .focused($confirmFieldFocused)
+                            .padding()
+                            .background(Color(UIColor.secondarySystemBackground))
+                            .cornerRadius(12)
+                            .onChange(of: confirmPasscode) { _, newValue in
+                                // Limit to 10 digits and numbers only
+                                let filtered = newValue.filter { $0.isNumber }
+                                if filtered.count > 10 {
+                                    confirmPasscode = String(filtered.prefix(10))
+                                } else if filtered != newValue {
+                                    confirmPasscode = filtered
+                                }
+                                passcodeError = nil
                             }
-                            passcodeError = nil
-                        }
+                    }
                 }
                 
                 if let error = passcodeError {
@@ -378,9 +465,9 @@ struct OnboardingView: View {
             
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                    Text("Important")
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.blue)
+                    Text("Passcode Requirements")
                         .font(.headline)
                 }
                 
@@ -390,10 +477,12 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding()
-            .background(Color.orange.opacity(0.1))
+            .background(Color(UIColor.secondarySystemBackground))
             .cornerRadius(12)
         }
         .onAppear {
+            passcodeStep = .enter
+            passcodeError = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 passcodeFieldFocused = true
             }
@@ -586,13 +675,7 @@ struct OnboardingView: View {
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
+                .background(Color.onboardingAccent)
                 .cornerRadius(12)
             }
             .disabled(!canProceed)
@@ -603,6 +686,8 @@ struct OnboardingView: View {
     private var nextButtonTitle: String {
         if currentStep == .tutorial {
             return "Get Started"
+        } else if currentStep == .passphrase {
+            return passcodeStep == .enter ? "Next" : "Done"
         } else if currentStep.canSkip {
             return "Continue"
         } else {
@@ -612,10 +697,16 @@ struct OnboardingView: View {
     
     private var canProceed: Bool {
         switch currentStep {
-        case .welcome, .permissions, .serverConfig, .tutorial, .biometric:
+        case .welcome, .serverConfig, .tutorial, .biometric:
             return true
+        case .permissions:
+            return permissionsCompleted
         case .passphrase:
-            return isPassphraseValid
+            if passcodeStep == .enter {
+                return passcode.count >= 4 && passcode.count <= 10 && passcode.allSatisfy({ $0.isNumber })
+            } else {
+                return isPassphraseValid
+            }
         }
     }
     
@@ -626,13 +717,27 @@ struct OnboardingView: View {
     // MARK: - Navigation Logic
     
     private func handleNextButton() {
-        // Validate current step
-        switch currentStep {
-        case .passphrase:
-            if !validatePassphrase() {
+        // Special handling for passcode step
+        if currentStep == .passphrase {
+            if passcodeStep == .enter {
+                // Move from enter to confirm
+                passcodeFieldFocused = false
+                passcodeStep = .confirm
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    confirmFieldFocused = true
+                }
                 return
+            } else {
+                // Validate and save
+                if !validatePassphrase() {
+                    return
+                }
+                savePassphrase()
             }
-            savePassphrase()
+        }
+        
+        // Validate other steps
+        switch currentStep {
         case .serverConfig:
             saveServerConfig()
         case .biometric:
@@ -658,12 +763,70 @@ struct OnboardingView: View {
     }
     
     private func goToPreviousStep() {
+        // Special handling for passcode step
+        if currentStep == .passphrase && passcodeStep == .confirm {
+            // Go back to enter step
+            confirmFieldFocused = false
+            passcodeStep = .enter
+            confirmPasscode = ""
+            passcodeError = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                passcodeFieldFocused = true
+            }
+            return
+        }
+        
+        // Normal previous step
         if let prevStep = OnboardingStep(rawValue: currentStep.rawValue - 1) {
             currentStep = prevStep
         }
     }
     
     // MARK: - Data Saving
+    
+    private func checkServer(_ host: String) async {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Basic validation
+        guard !trimmed.isEmpty else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        // Check if it looks like a valid host
+        guard trimmed.contains(".") || trimmed.contains(":") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        await MainActor.run { serverCheckStatus = .checking }
+        
+        // Try to reach the server
+        guard let url = URL(string: "https://\(trimmed)/") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5.0
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    await MainActor.run { serverCheckStatus = .online }
+                } else {
+                    await MainActor.run { serverCheckStatus = .offline }
+                }
+            } else {
+                await MainActor.run { serverCheckStatus = .offline }
+            }
+        } catch {
+            // Server might be offline but address could be valid
+            await MainActor.run { serverCheckStatus = .offline }
+        }
+    }
     
     private func validatePassphrase() -> Bool {
         let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -753,6 +916,7 @@ private struct FeatureRow: View {
 private struct SequentialPermissionFlow: View {
     @ObservedObject var permissionManager: PermissionManager
     @Binding var isRequestingPermission: Bool
+    @Binding var allPermissionsCompleted: Bool
     @State private var currentPermissionIndex = 0
     @State private var showingLocalNetworkInfo = false
     
@@ -835,47 +999,67 @@ private struct SequentialPermissionFlow: View {
                                     }
                                 }
                             } label: {
-                                HStack {
+                                HStack(spacing: 10) {
                                     if isRequestingPermission {
                                         ProgressView()
                                             .tint(.white)
                                     } else {
-                                        Image(systemName: "checkmark")
-                                        Text("Allow")
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.title3)
+                                        Text("Enable")
+                                            .font(.headline)
                                     }
                                 }
                                 .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.onboardingAccent)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color.onboardingAccent)
+                                )
                                 .foregroundColor(.white)
-                                .cornerRadius(12)
+                                .shadow(color: Color.onboardingAccent.opacity(0.3), radius: 8, y: 4)
                             }
                             .disabled(isRequestingPermission)
-                        } else if currentStatus == .denied {
-                            Button {
-                                permissionManager.openSettings()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "gear")
-                                    Text("Open Settings")
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.orange)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                            }
-                        }
-                        
-                        if currentStatus != .authorized {
+                            
                             Button {
                                 withAnimation {
                                     advanceToNext()
                                 }
                             } label: {
-                                Text(currentStatus == .notDetermined ? "Skip for Now" : "Continue")
-                                    .font(.body)
+                                Text("Skip for Now")
+                                    .font(.subheadline)
                                     .foregroundColor(.secondary)
+                                    .padding(.vertical, 8)
+                            }
+                        } else if currentStatus == .denied {
+                            Button {
+                                permissionManager.openSettings()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "gear")
+                                        .font(.title3)
+                                    Text("Open Settings")
+                                        .font(.headline)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color.orange)
+                                )
+                                .foregroundColor(.white)
+                                .shadow(color: Color.orange.opacity(0.3), radius: 8, y: 4)
+                            }
+                            
+                            Button {
+                                withAnimation {
+                                    advanceToNext()
+                                }
+                            } label: {
+                                Text("Continue Anyway")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .padding(.vertical, 8)
                             }
                         } else {
                             Button {
@@ -883,15 +1067,20 @@ private struct SequentialPermissionFlow: View {
                                     advanceToNext()
                                 }
                             } label: {
-                                HStack {
+                                HStack(spacing: 10) {
                                     Text("Continue")
-                                    Image(systemName: "arrow.right")
+                                        .font(.headline)
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .font(.title3)
                                 }
                                 .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.green)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color.green)
+                                )
                                 .foregroundColor(.white)
-                                .cornerRadius(12)
+                                .shadow(color: Color.green.opacity(0.3), radius: 8, y: 4)
                             }
                         }
                     }
@@ -959,6 +1148,7 @@ private struct SequentialPermissionFlow: View {
             Button {
                 withAnimation {
                     showingLocalNetworkInfo = true
+                    allPermissionsCompleted = true
                 }
             } label: {
                 HStack {
@@ -1110,13 +1300,7 @@ private struct TutorialStep: View {
         HStack(alignment: .top, spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.blue, .purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.onboardingAccent)
                     .frame(width: 44, height: 44)
                 
                 Image(systemName: icon)

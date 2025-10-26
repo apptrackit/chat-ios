@@ -52,7 +52,7 @@ struct PermissionsView: View {
                 
                 PermissionRow(
                     icon: "camera.fill",
-                    iconColor: .purple,
+                    iconColor: .onboardingAccent,
                     title: "Camera",
                     description: "Scan QR codes to join rooms",
                     status: permissionManager.cameraStatus,

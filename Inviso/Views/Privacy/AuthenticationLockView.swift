@@ -8,9 +8,9 @@ struct AuthenticationLockView: View {
     private var biometricLabel: String {
         switch manager.biometricCapability {
         case .faceID:
-            return "Unlock with Face ID"
+            return "Use Face ID"
         case .touchID:
-            return "Unlock with Touch ID"
+            return "Use Touch ID"
         case .none:
             return "Unlock"
         }
@@ -18,105 +18,107 @@ struct AuthenticationLockView: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.55)
+            Color.black.opacity(0.6)
                 .ignoresSafeArea()
 
-            VStack(spacing: 24) {
-                Image(systemName: "lock.circle.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 64, height: 64)
-                    .foregroundStyle(.primary)
+            VStack(spacing: 20) {
+                // App icon or lock icon
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 8)
 
-                VStack(spacing: 8) {
-                    Text("Secure Session Locked")
-                        .font(.title3.weight(.semibold))
-                    Text("Authenticate to resume your encrypted conversations.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                }
+                Text("Secure Session Locked")
+                    .font(.title2.weight(.semibold))
                 
-                // Show Face ID button if available and not attempting
+                Text("Enter your passcode to continue")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 12)
+                
+                // Face ID button if available
                 if manager.shouldPromptBiometric && !manager.isAttemptingBiometric {
                     Button {
                         manager.triggerBiometricIfNeeded()
                     } label: {
-                        HStack {
+                        HStack(spacing: 8) {
                             Image(systemName: manager.biometricCapability.systemImageName)
                             Text(biometricLabel)
                         }
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(.blue)
                 }
                 
-                // Show biometric progress if attempting
+                // Biometric progress
                 if manager.isAttemptingBiometric {
-                    VStack(spacing: 12) {
-                        HStack {
-                            Image(systemName: manager.biometricCapability.systemImageName)
-                            Text("Authenticating...")
-                            Spacer(minLength: 12)
-                            ProgressView()
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue.opacity(0.2))
-                        .cornerRadius(12)
-                        
-                        Text("Look at your device to unlock")
-                            .font(.caption)
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Authenticating...")
                             .foregroundColor(.secondary)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.blue.opacity(0.15))
+                    .cornerRadius(12)
                 }
 
-                // Show passcode field only if:
-                // 1. Passcode is required AND
-                // 2. (Biometric not available OR biometric already attempted/failed OR explicitly requiring passcode entry)
+                // Passcode input - clean and minimal
                 if manager.requiresPassphraseEntry && (!manager.shouldPromptBiometric || !manager.isAttemptingBiometric) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        SecureField("Passcode", text: $passcode)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Passcode")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        SecureField("Enter passcode", text: $passcode)
                             .keyboardType(.numberPad)
                             .focused($isPasscodeFocused)
                             .textContentType(.password)
-                            .submitLabel(.done)
-                            .onSubmit(submitPasscode)
                             .padding()
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(12)
-
-                        Button("Unlock with Passcode", action: submitPasscode)
-                            .buttonStyle(.bordered)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .toolbar {
+                                ToolbarItemGroup(placement: .keyboard) {
+                                    Spacer()
+                                    Button("Done") {
+                                        submitPasscode()
+                                    }
+                                    .disabled(passcode.isEmpty)
+                                }
+                            }
 
                         if let error = manager.passphraseError {
-                            Text(error)
-                                .foregroundColor(.red)
-                                .font(.footnote)
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                Text(error)
+                            }
+                            .foregroundColor(.red)
+                            .font(.caption)
                         }
+                        
+                        Button {
+                            submitPasscode()
+                        } label: {
+                            Text("Unlock")
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .disabled(passcode.isEmpty)
                     }
                 }
-
-                if manager.requiresPassphraseEntry, manager.shouldPromptBiometric {
-                    Text("Use \(manager.biometricCapability.localizedName) or enter your passcode to unlock.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                } else if manager.requiresPassphraseEntry {
-                    Text("Enter your passcode to unlock the app.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                }
             }
-            .padding(28)
-            .frame(maxWidth: 420)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .shadow(radius: 18)
-            .padding(.horizontal, 32)
+            .padding(24)
+            .frame(maxWidth: 360)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(radius: 20)
+            .padding(.horizontal, 24)
         }
         .onAppear {
-            // Don't auto-focus passcode if biometric is available and will be attempted
             if manager.requiresPassphraseEntry && !manager.shouldPromptBiometric {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     isPasscodeFocused = true
@@ -130,7 +132,6 @@ struct AuthenticationLockView: View {
             }
         }
         .onChange(of: manager.isAttemptingBiometric) { _, attempting in
-            // When biometric attempt finishes, auto-focus passcode if still needed
             if !attempting && manager.requiresPassphraseEntry {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     isPasscodeFocused = true
