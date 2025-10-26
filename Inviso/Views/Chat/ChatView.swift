@@ -12,6 +12,10 @@ struct ChatView: View {
     @State private var showVoiceRecorder = false
     @State private var showPermissionAlert = false
     @State private var permissionAlertMessage = ""
+    @State private var showLifetimeSettings = false
+    @State private var showLifetimeProposal = false
+    @State private var proposedLifetime: MessageLifetime? = nil
+    @State private var proposerName: String = ""
     @StateObject private var permissionManager = PermissionManager.shared
 
     var body: some View {
@@ -20,7 +24,10 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        ForEach(Array(chat.messages.enumerated()), id: \.element.id) { index, msg in
+                        ForEach(Array(chat.messages.enumerated()), id: \.element.id) { item in
+                            let index = item.offset
+                            let msg = item.element
+                            
                             if msg.isSystem {
                                 Text(msg.text)
                                     .font(.caption)
@@ -42,7 +49,12 @@ struct ChatView: View {
                             } else {
                                 // Text message
                                 let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: chat.messages[index - 1].timestamp, toGranularity: .minute)
-                                ChatBubble(message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp), showTime: showTime)
+                                ChatBubble(
+                                    message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp),
+                                    showTime: showTime,
+                                    expiresAt: msg.expiresAt,
+                                    lifetime: msg.lifetime
+                                )
                                     .id(msg.id)
                                     .padding(.horizontal)
                             }
@@ -67,25 +79,36 @@ struct ChatView: View {
         .navigationBarBackButtonHidden(true)
         .onAppear {
             chat.chatViewDidAppear()
+            setupLifetimeProposalObserver()
         }
         .onDisappear {
             chat.chatViewDidDisappear()
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Button {
-                    showRoomSettings = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(chat.activeSessionDisplayName)
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        Image(systemName: "chevron.down")
-                            .font(.caption2.weight(.bold))
-                            .foregroundColor(.secondary)
+                VStack(spacing: 2) {
+                    Button {
+                        showRoomSettings = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(chat.activeSessionDisplayName)
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Image(systemName: "chevron.down")
+                                .font(.caption2.weight(.bold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    // Message lifetime indicator (only when connected)
+                    if chat.isP2PConnected, let session = chat.activeSession {
+                        CompactLifetimeIndicator(
+                            lifetime: session.messageLifetime,
+                            agreedByBoth: session.lifetimeAgreedByBoth
+                        )
                     }
                 }
-                .buttonStyle(.plain)
             }
             
             ToolbarItem(placement: .navigationBarLeading) {
@@ -172,6 +195,23 @@ struct ChatView: View {
                     RoomSettingsView(session: session)
                         .environmentObject(chat)
                 }
+            }
+        }
+        .sheet(isPresented: $showLifetimeSettings) {
+            MessageLifetimeSettingsView(chatManager: chat)
+        }
+        .sheet(isPresented: $showLifetimeProposal) {
+            if let proposed = proposedLifetime {
+                LifetimeProposalSheet(
+                    proposedLifetime: proposed,
+                    peerName: proposerName,
+                    onAccept: {
+                        chat.acceptLifetimeProposal(proposed)
+                    },
+                    onReject: {
+                        chat.rejectLifetimeProposal()
+                    }
+                )
             }
         }
         .sheet(isPresented: $showLocationPicker) {
@@ -292,6 +332,21 @@ struct ChatView: View {
             chat.leave(userInitiated: true)
         }
     }
+    
+    private func setupLifetimeProposalObserver() {
+        NotificationCenter.default.addObserver(
+            forName: .lifetimeProposalReceived,
+            object: nil,
+            queue: .main
+        ) { [self] notification in
+            if let lifetime = notification.userInfo?["lifetime"] as? MessageLifetime,
+               let peerName = notification.userInfo?["peerName"] as? String {
+                proposedLifetime = lifetime
+                proposerName = peerName
+                showLifetimeProposal = true
+            }
+        }
+    }
 }
 
 
@@ -317,34 +372,43 @@ private struct DisablePopGesture: UIViewControllerRepresentable {
 struct ChatBubble: View {
     let message: MessageItem
     var showTime: Bool = true
+    var expiresAt: Date? = nil
+    var lifetime: MessageLifetime? = nil
     @State private var showCopied = false
 
     var body: some View {
         HStack(alignment: .bottom) {
             if message.isFromSelf { Spacer() }
             VStack(alignment: message.isFromSelf ? .trailing : .leading, spacing: 4) {
-                Text(message.text)
-                    .padding(10)
-                    .foregroundColor(message.isFromSelf ? .white : .primary)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
-                    )
-                    .onLongPressGesture(minimumDuration: 0.3) {
-                        // Copy message instantly on long press
-                        let impactMed = UIImpactFeedbackGenerator(style: .medium)
-                        impactMed.impactOccurred()
-                        
-                        UIPasteboard.general.string = message.text
+                VStack(alignment: message.isFromSelf ? .trailing : .leading, spacing: 4) {
+                    Text(message.text)
+                        .padding(10)
+                        .foregroundColor(message.isFromSelf ? .white : .primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
+                        )
+                    
+                    // Expiration indicator for saved messages
+                    if let expiresAt = expiresAt {
+                        MessageExpirationView(expiresAt: expiresAt)
+                    }
+                }
+                .onLongPressGesture(minimumDuration: 0.3) {
+                    // Copy message instantly on long press
+                    let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                    impactMed.impactOccurred()
+                    
+                    UIPasteboard.general.string = message.text
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                        showCopied = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                            showCopied = true
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                showCopied = false
-                            }
+                            showCopied = false
                         }
                     }
+                }
                 if showTime {
                     Text(message.time, style: .time)
                         .font(.caption2)

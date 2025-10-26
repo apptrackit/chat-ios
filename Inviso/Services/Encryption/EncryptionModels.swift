@@ -101,23 +101,72 @@ enum KeyType: String {
 struct KeyExchangeMessage: Codable {
     let type: String
     let publicKey: String  // Base64-encoded public key (32 bytes)
+    let sessionId: String  // Room ID for key association
     let timestamp: TimeInterval
     
-    init(publicKey: String, timestamp: TimeInterval = Date().timeIntervalSince1970) {
+    init(publicKey: String, sessionId: String, timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.type = "key_exchange"
         self.publicKey = publicKey
+        self.sessionId = sessionId
         self.timestamp = timestamp
     }
 }
 
-/// WebSocket signaling message for key exchange completion
+/// WebSocket signaling message for confirming key exchange completion
 struct KeyExchangeCompleteMessage: Codable {
     let type: String
+    let sessionId: String
     let timestamp: TimeInterval
     
-    init(timestamp: TimeInterval = Date().timeIntervalSince1970) {
+    init(sessionId: String, timestamp: TimeInterval = Date().timeIntervalSince1970) {
         self.type = "key_exchange_complete"
+        self.sessionId = sessionId
         self.timestamp = timestamp
+    }
+}
+
+// MARK: - Message Lifetime Negotiation
+
+/// WebSocket signaling message for proposing message lifetime
+struct LifetimeProposalMessage: Codable {
+    let type: String
+    let sessionId: String
+    let lifetime: String // MessageLifetime rawValue
+    let proposedAt: Double // Unix timestamp
+    
+    init(sessionId: String, lifetime: String, proposedAt: Double = Date().timeIntervalSince1970) {
+        self.type = "lifetime_proposal"
+        self.sessionId = sessionId
+        self.lifetime = lifetime
+        self.proposedAt = proposedAt
+    }
+}
+
+/// WebSocket signaling message for accepting lifetime proposal
+struct LifetimeAcceptMessage: Codable {
+    let type: String
+    let sessionId: String
+    let lifetime: String // MessageLifetime rawValue
+    let acceptedAt: Double // Unix timestamp
+    
+    init(sessionId: String, lifetime: String, acceptedAt: Double = Date().timeIntervalSince1970) {
+        self.type = "lifetime_accept"
+        self.sessionId = sessionId
+        self.lifetime = lifetime
+        self.acceptedAt = acceptedAt
+    }
+}
+
+/// WebSocket signaling message for rejecting lifetime proposal
+struct LifetimeRejectMessage: Codable {
+    let type: String
+    let sessionId: String
+    let reason: String?
+    
+    init(sessionId: String, reason: String? = nil) {
+        self.type = "lifetime_reject"
+        self.sessionId = sessionId
+        self.reason = reason
     }
 }
 
@@ -127,6 +176,11 @@ extension Notification.Name {
     static let keyExchangeReceived = Notification.Name("keyExchangeReceived")
     static let keyExchangeCompleteReceived = Notification.Name("keyExchangeCompleteReceived")
     static let encryptionFailed = Notification.Name("encryptionFailed")
+    
+    // Message lifetime negotiation
+    static let lifetimeProposalReceived = Notification.Name("lifetimeProposalReceived")
+    static let lifetimeAcceptReceived = Notification.Name("lifetimeAcceptReceived")
+    static let lifetimeRejectReceived = Notification.Name("lifetimeRejectReceived")
 }
 
 // MARK: - Constants

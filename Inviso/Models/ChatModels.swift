@@ -22,12 +22,29 @@ struct ChatMessage: Identifiable, Equatable {
     var locationData: LocationData? = nil // Optional location data for location messages
     var voiceData: VoiceData? = nil // Optional voice data for voice messages
     
+    // Message retention metadata
+    var savedLocally: Bool = false // Whether this message is stored on disk
+    var expiresAt: Date? = nil // When this message will be auto-deleted
+    var lifetime: MessageLifetime? = nil // Retention policy for this message
+    
     var isLocationMessage: Bool {
         locationData != nil
     }
     
     var isVoiceMessage: Bool {
         voiceData != nil
+    }
+    
+    /// Check if message has expired
+    var isExpired: Bool {
+        guard let expiresAt = expiresAt else { return false }
+        return Date() >= expiresAt
+    }
+    
+    /// Time remaining until expiration (for UI display)
+    var timeUntilExpiration: TimeInterval? {
+        guard let expiresAt = expiresAt else { return nil }
+        return expiresAt.timeIntervalSinceNow
     }
 }
 
@@ -86,6 +103,11 @@ struct ChatSession: Identifiable, Equatable, Codable {
     // Notification tracking
     var notifications: [SessionNotification] = []
     
+    // Message retention settings (agreed between both peers)
+    var messageLifetime: MessageLifetime = .ephemeral // Default: RAM only
+    var lifetimeAgreedAt: Date? // When both peers agreed on current setting
+    var lifetimeAgreedByBoth: Bool = false // True when both confirmed
+    
     // Computed property for unread notification count
     var unreadNotificationCount: Int {
         notifications.filter { $0.isUnread }.count
@@ -118,7 +140,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder, notifications
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder, notifications, messageLifetime, lifetimeAgreedAt, lifetimeAgreedByBoth
     }
     
     init(from decoder: Decoder) throws {
@@ -146,6 +168,10 @@ struct ChatSession: Identifiable, Equatable, Codable {
         pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
         // Notification tracking (default to empty array for backward compatibility)
         notifications = try container.decodeIfPresent([SessionNotification].self, forKey: .notifications) ?? []
+        // Message retention (default to ephemeral for backward compatibility)
+        messageLifetime = try container.decodeIfPresent(MessageLifetime.self, forKey: .messageLifetime) ?? .ephemeral
+        lifetimeAgreedAt = try container.decodeIfPresent(Date.self, forKey: .lifetimeAgreedAt)
+        lifetimeAgreedByBoth = try container.decodeIfPresent(Bool.self, forKey: .lifetimeAgreedByBoth) ?? false
     }
 
     var displayName: String {

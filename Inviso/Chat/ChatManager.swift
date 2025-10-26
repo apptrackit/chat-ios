@@ -388,6 +388,250 @@ class ChatManager: NSObject, ObservableObject {
             print("❌ Failed to encrypt voice: \(error)")
         }
     }
+    
+    // MARK: - Message Lifetime Management
+    
+    /// Propose a message lifetime change to the peer
+    func proposeMessageLifetime(_ lifetime: MessageLifetime) throws {
+        guard isP2PConnected else {
+            throw NSError(domain: "ChatManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Not connected to peer"])
+        }
+        guard isEncryptionReady else {
+            throw NSError(domain: "ChatManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Encryption not ready"])
+        }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            throw NSError(domain: "ChatManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "No encryption state"])
+        }
+        
+        do {
+            // Create proposal message
+            let proposal = LifetimeProposalMessage(
+                sessionId: roomId,
+                lifetime: lifetime.rawValue
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(proposal)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the proposal
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonPayload)
+            if ok {
+                print("📤 Sent lifetime proposal: \(lifetime.displayName)")
+                
+                // Update local session optimistically (waiting for confirmation)
+                if let sessionId = activeSessionId,
+                   let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    sessions[sessionIndex].messageLifetime = lifetime
+                    sessions[sessionIndex].lifetimeAgreedByBoth = false
+                    persistSessions()
+                }
+            }
+        } catch {
+            throw error
+        }
+    }
+    
+    /// Accept a lifetime proposal from peer
+    func acceptLifetimeProposal(_ lifetime: MessageLifetime) {
+        guard isP2PConnected, isEncryptionReady else { return }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else { return }
+        
+        do {
+            // Create accept message
+            let accept = LifetimeAcceptMessage(
+                sessionId: roomId,
+                lifetime: lifetime.rawValue
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(accept)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the accept
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonPayload)
+            if ok {
+                print("✅ Accepted lifetime proposal: \(lifetime.displayName)")
+                
+                // Update local session
+                if let sessionId = activeSessionId,
+                   let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    sessions[sessionIndex].messageLifetime = lifetime
+                    sessions[sessionIndex].lifetimeAgreedAt = Date()
+                    sessions[sessionIndex].lifetimeAgreedByBoth = true
+                    persistSessions()
+                    
+                    // Add system message
+                    messages.append(ChatMessage(
+                        text: "Message retention changed to \(lifetime.displayName)",
+                        timestamp: Date(),
+                        isFromSelf: false,
+                        isSystem: true
+                    ))
+                }
+            }
+        } catch {
+            print("❌ Failed to send accept: \(error)")
+        }
+    }
+    
+    /// Reject a lifetime proposal from peer
+    func rejectLifetimeProposal() {
+        guard isP2PConnected, isEncryptionReady else { return }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else { return }
+        
+        do {
+            // Create reject message
+            let reject = LifetimeRejectMessage(
+                sessionId: roomId,
+                reason: "User declined"
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(reject)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the reject
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            _ = pcm.sendData(jsonPayload)
+            print("❌ Rejected lifetime proposal")
+        } catch {
+            print("❌ Failed to send reject: \(error)")
+        }
+    }
+    
+    /// Handle incoming lifetime proposal from peer
+    private func handleLifetimeProposal(_ proposal: LifetimeProposalMessage) {
+        guard let lifetime = MessageLifetime(rawValue: proposal.lifetime) else {
+            print("⚠️ Invalid lifetime value: \(proposal.lifetime)")
+            return
+        }
+        
+        print("📩 Received lifetime proposal: \(lifetime.displayName)")
+        
+        // Post notification to show UI
+        NotificationCenter.default.post(
+            name: .lifetimeProposalReceived,
+            object: nil,
+            userInfo: ["lifetime": lifetime, "peerName": activeSession?.displayName ?? "Peer"]
+        )
+    }
+    
+    /// Handle incoming lifetime accept from peer
+    private func handleLifetimeAccept(_ accept: LifetimeAcceptMessage) {
+        guard let lifetime = MessageLifetime(rawValue: accept.lifetime) else {
+            print("⚠️ Invalid lifetime value: \(accept.lifetime)")
+            return
+        }
+        
+        print("✅ Peer accepted lifetime: \(lifetime.displayName)")
+        
+        // Update local session to mark as agreed
+        if let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[sessionIndex].messageLifetime = lifetime
+            sessions[sessionIndex].lifetimeAgreedAt = Date()
+            sessions[sessionIndex].lifetimeAgreedByBoth = true
+            persistSessions()
+            
+            // Add system message
+            messages.append(ChatMessage(
+                text: "Message retention changed to \(lifetime.displayName)",
+                timestamp: Date(),
+                isFromSelf: false,
+                isSystem: true
+            ))
+        }
+    }
+    
+    /// Handle incoming lifetime reject from peer
+    private func handleLifetimeReject(_ reject: LifetimeRejectMessage) {
+        print("❌ Peer rejected lifetime proposal: \(reject.reason ?? "No reason")")
+        
+        // Revert local session back to previous agreed state
+        if let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+            // Reset agreed flag
+            sessions[sessionIndex].lifetimeAgreedByBoth = false
+            persistSessions()
+            
+            // Add system message
+            messages.append(ChatMessage(
+                text: "Peer declined retention change",
+                timestamp: Date(),
+                isFromSelf: false,
+                isSystem: true
+            ))
+        }
+    }
 
     // MARK: - ChatView Lifecycle Management
     /// Called when ChatView appears. If we have a pending room_ready, process it now.
@@ -1880,7 +2124,7 @@ extension ChatManager: PeerConnectionManagerDelegate {
             state.receiveCounter = max(state.receiveCounter, wireFormat.c + 1)
             encryptionStates[roomId] = state
             
-            // Check if message is a location (JSON format)
+            // Check message type (location, voice, lifetime proposal, or text)
             if let locationData = LocationData.fromJSONString(plaintext) {
                 // Display as location message
                 var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
@@ -1893,6 +2137,18 @@ extension ChatManager: PeerConnectionManagerDelegate {
                 msg.voiceData = voiceData
                 messages.append(msg)
                 print("🎤 Received voice message: \(voiceData.duration)s")
+            } else if let jsonData = plaintext.data(using: .utf8) {
+                // Try to decode lifetime messages
+                if let proposal = try? decoder.decode(LifetimeProposalMessage.self, from: jsonData) {
+                    handleLifetimeProposal(proposal)
+                } else if let accept = try? decoder.decode(LifetimeAcceptMessage.self, from: jsonData) {
+                    handleLifetimeAccept(accept)
+                } else if let reject = try? decoder.decode(LifetimeRejectMessage.self, from: jsonData) {
+                    handleLifetimeReject(reject)
+                } else {
+                    // Display as text message
+                    messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+                }
             } else {
                 // Display as text message
                 messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
