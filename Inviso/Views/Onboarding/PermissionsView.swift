@@ -14,16 +14,6 @@ struct PermissionsView: View {
     var body: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Permissions allow you to use specific features. If a permission is disabled, the related feature won't be available.")
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
-            }
-            
-            Section(header: Text("App Permissions")) {
                 PermissionRow(
                     icon: "location.fill",
                     iconColor: .blue,
@@ -52,7 +42,7 @@ struct PermissionsView: View {
                 
                 PermissionRow(
                     icon: "camera.fill",
-                    iconColor: .onboardingAccent,
+                    iconColor: Color(red: 0x1a / 255.0, green: 0x73 / 255.0, blue: 0x99 / 255.0),
                     title: "Camera",
                     description: "Scan QR codes to join rooms",
                     status: permissionManager.cameraStatus,
@@ -75,36 +65,11 @@ struct PermissionsView: View {
                     onRequest: requestNotificationPermission,
                     onOpenSettings: permissionManager.openSettings
                 )
+            } header: {
+                Label("Permissions", systemImage: "checkmark.shield.fill")
             }
             
             Section {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundColor(.blue)
-                        Text("About Permissions")
-                            .font(.headline)
-                    }
-                    
-                    Text("Permissions are handled by iOS. If you've previously denied a permission, you'll need to enable it in the Settings app.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, 4)
-            }
-            
-            Section {
-                NavigationLink {
-                    FeatureAvailabilityView()
-                } label: {
-                    HStack {
-                        Image(systemName: "list.bullet.clipboard")
-                        Text("View Feature Availability")
-                        Spacer()
-                    }
-                }
-                
                 Button {
                     Task {
                         await permissionManager.refreshAllPermissions()

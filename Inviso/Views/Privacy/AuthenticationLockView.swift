@@ -3,6 +3,9 @@ import SwiftUI
 struct AuthenticationLockView: View {
     @ObservedObject var manager: AppSecurityManager
     @State private var passcode = ""
+    @State private var showEraseConfirm = false
+    @State private var eraseConfirmText = ""
+    @State private var isErasing = false
     @FocusState private var isPasscodeFocused: Bool
 
     private var biometricLabel: String {
@@ -80,15 +83,6 @@ struct AuthenticationLockView: View {
                             .padding()
                             .background(Color(UIColor.secondarySystemBackground))
                             .cornerRadius(12)
-                            .toolbar {
-                                ToolbarItemGroup(placement: .keyboard) {
-                                    Spacer()
-                                    Button("Done") {
-                                        submitPasscode()
-                                    }
-                                    .disabled(passcode.isEmpty)
-                                }
-                            }
 
                         if let error = manager.passphraseError {
                             HStack(spacing: 6) {
@@ -109,6 +103,20 @@ struct AuthenticationLockView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(.blue)
                         .disabled(passcode.isEmpty)
+                        
+                        // Erase all data button
+                        Button(role: .destructive) {
+                            showEraseConfirm = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "trash.fill")
+                                Text("Erase All Data")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
                     }
                 }
             }
@@ -117,6 +125,18 @@ struct AuthenticationLockView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .shadow(radius: 20)
             .padding(.horizontal, 24)
+        }
+        .alert("Erase All Data", isPresented: $showEraseConfirm) {
+            TextField("Type CONFIRM to erase", text: $eraseConfirmText)
+            Button("Cancel", role: .cancel) {
+                eraseConfirmText = ""
+            }
+            Button("Erase Everything", role: .destructive) {
+                performCompleteErase()
+            }
+            .disabled(eraseConfirmText != "CONFIRM")
+        } message: {
+            Text("This will completely reset the app: remove all data, cache, passcode, Face ID, permissions, and close the app. You'll see onboarding again on next launch.\n\nType CONFIRM to proceed.")
         }
         .onAppear {
             if manager.requiresPassphraseEntry && !manager.shouldPromptBiometric {
@@ -144,6 +164,28 @@ struct AuthenticationLockView: View {
         guard passcode.isEmpty == false else { return }
         manager.submitPassphrase(passcode)
         passcode.removeAll()
+    }
+    
+    private func performCompleteErase() {
+        isErasing = true
+        Task {
+            // Purge server data
+            await AppDataReset.eraseAll()
+            
+            // Remove passcode and biometric
+            PassphraseManager.shared.clear()
+            await MainActor.run {
+                AuthenticationSettingsStore.shared.reset()
+            }
+            
+            // Reset onboarding
+            OnboardingManager.shared.resetOnboarding()
+            
+            // Exit app
+            await MainActor.run {
+                exit(0)
+            }
+        }
     }
 }
 

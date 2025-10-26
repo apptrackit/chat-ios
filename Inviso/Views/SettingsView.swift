@@ -5,9 +5,12 @@ struct SettingsView: View {
     @EnvironmentObject private var chat: ChatManager
     @State private var showEraseConfirm: Bool = false
     @State private var isErasing: Bool = false
+    @State private var eraseConfirmText: String = ""
     @ObservedObject private var serverConfig = ServerConfig.shared
     @State private var editServerHost: String = ServerConfig.shared.host
     @State private var showServerChangeAlert = false
+    @State private var serverCheckStatus: ServerCheckStatus = .idle
+    @State private var serverCheckTask: Task<Void, Never>?
     @ObservedObject private var authStore = AuthenticationSettingsStore.shared
     @State private var requireBiometric = AuthenticationSettingsStore.shared.settings.mode.requiresBiometrics
     @State private var requirePasscode = AuthenticationSettingsStore.shared.settings.mode.requiresPassphrase
@@ -23,14 +26,55 @@ struct SettingsView: View {
     @State private var reauthMode: AuthenticationSettings.Mode = .disabled
     @State private var reauthErrorMessage: String?
     @State private var isReauthBiometricInFlight = false
+    
+    enum ServerCheckStatus {
+        case idle
+        case checking
+        case online
+        case offline
+        case invalid
+        
+        var icon: String {
+            switch self {
+            case .idle: return "circle"
+            case .checking: return "circle.dotted"
+            case .online: return "checkmark.circle.fill"
+            case .offline: return "exclamationmark.circle.fill"
+            case .invalid: return "xmark.circle.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .idle: return .secondary
+            case .checking: return .blue
+            case .online: return .green
+            case .offline: return .orange
+            case .invalid: return .red
+            }
+        }
+        
+        var text: String {
+            switch self {
+            case .idle: return "Not checked"
+            case .checking: return "Checking..."
+            case .online: return "Server online"
+            case .offline: return "Server offline"
+            case .invalid: return "Invalid address"
+            }
+        }
+    }
 
     var body: some View {
         Form {
-            Section(header: Text("Privacy")) {
+            Section(header: Label("Privacy", systemImage: "lock.shield.fill")) {
                 NavigationLink {
                     EphemeralIDsView()
                 } label: {
                     HStack {
+                        Image(systemName: "person.badge.key.fill")
+                            .foregroundColor(.blue)
+                            .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Session Identities")
                             Text("Each session uses a unique, ephemeral ID")
@@ -55,22 +99,12 @@ struct SettingsView: View {
                     PermissionsView()
                 } label: {
                     HStack {
+                        Image(systemName: "checkmark.shield.fill")
+                            .foregroundColor(.green)
+                            .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Permissions")
-                            Text("Manage app permissions and features")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                
-                NavigationLink {
-                    NotificationSettingsView()
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Push Notifications")
-                            Text("Get notified when someone joins your room")
+                            Text("Manage app permissions")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -80,7 +114,7 @@ struct SettingsView: View {
 
             securitySection
 
-            Section(header: Text("About")) {
+            Section(header: Label("About", systemImage: "info.circle.fill")) {
                 HStack {
                     Text("Server")
                     Spacer()
@@ -117,57 +151,43 @@ struct SettingsView: View {
                 }
             }
 
-            Section(header: Text("Danger Zone")) {
+            Section(header: Label("Danger Zone", systemImage: "exclamationmark.triangle.fill")) {
                 Button(role: .destructive) {
+                    eraseConfirmText = ""
                     showEraseConfirm = true
                 } label: {
                     HStack {
-                        Image(systemName: "trash")
+                        Image(systemName: "trash.fill")
                         Text("Erase All Data")
                         if isErasing { Spacer(); ProgressView() }
                     }
                 }
                 .disabled(isErasing)
-                .help("Removes local data and cache, purges server data for this device, and resets the device ID.")
-                
-                Button {
-                    OnboardingManager.shared.resetOnboarding()
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.counterclockwise")
-                        Text("Reset Onboarding")
-                    }
-                }
-                .help("Reset onboarding to see the welcome screens again on next launch.")
             }
         }
         .navigationTitle("Settings")
-        .alert("Change Server", isPresented: $showServerChangeAlert) {
-            TextField("Host", text: $editServerHost)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                let newHost = editServerHost
-                chat.changeServerHost(to: newHost)
-            }
-        } message: {
-            Text("Enter server host (e.g. chat.example.com). Current: \(serverConfig.host)")
-        }
-        .alert("Erase All Data?", isPresented: $showEraseConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Erase", role: .destructive) {
-                isErasing = true
-                Task {
-                    // CRITICAL: Purge server FIRST (before clearing ephemeral IDs)
-                    await eraseAll()
-                    // Then clear in-memory and persisted UI state
-                    await MainActor.run {
-                        chat.eraseLocalState()
-                        isErasing = false
-                    }
+        .sheet(isPresented: $showServerChangeAlert) {
+            ServerChangeView(
+                editServerHost: $editServerHost,
+                serverCheckStatus: $serverCheckStatus,
+                serverCheckTask: $serverCheckTask,
+                onSave: {
+                    chat.changeServerHost(to: editServerHost)
+                    showServerChangeAlert = false
                 }
+            )
+        }
+        .alert("Erase All Data", isPresented: $showEraseConfirm) {
+            TextField("Type CONFIRM to erase", text: $eraseConfirmText)
+            Button("Cancel", role: .cancel) {
+                eraseConfirmText = ""
             }
+            Button("Erase Everything", role: .destructive) {
+                performCompleteErase()
+            }
+            .disabled(eraseConfirmText != "CONFIRM")
         } message: {
-            Text("This removes all local data and cache, requests server-side purge for all your sessions, and clears all ephemeral IDs. This cannot be undone.")
+            Text("This will completely reset the app: remove all data, cache, passcode, Face ID, permissions, and close the app. You'll see onboarding again on next launch.\n\nType CONFIRM to proceed.")
         }
         .onAppear {
             syncAuthState()
@@ -759,6 +779,73 @@ extension SettingsView {
     private func eraseAll() async {
         await AppDataReset.eraseAll()
     }
+    
+    private func performCompleteErase() {
+        isErasing = true
+        Task {
+            // Purge server data
+            await eraseAll()
+            
+            // Clear chat state
+            await MainActor.run {
+                chat.eraseLocalState()
+            }
+            
+            // Remove passcode and biometric
+            PassphraseManager.shared.clear()
+            await MainActor.run {
+                AuthenticationSettingsStore.shared.reset()
+            }
+            
+            // Reset onboarding
+            OnboardingManager.shared.resetOnboarding()
+            
+            // Exit app
+            await MainActor.run {
+                exit(0)
+            }
+        }
+    }
+    
+    private func checkServer(_ host: String) async {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmed.isEmpty else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        guard trimmed.contains(".") || trimmed.contains(":") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        await MainActor.run { serverCheckStatus = .checking }
+        
+        guard let url = URL(string: "https://\(trimmed)/") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5.0
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    await MainActor.run { serverCheckStatus = .online }
+                } else {
+                    await MainActor.run { serverCheckStatus = .offline }
+                }
+            } else {
+                await MainActor.run { serverCheckStatus = .offline }
+            }
+        } catch {
+            await MainActor.run { serverCheckStatus = .offline }
+        }
+    }
 
     private func purgeServer(deviceId: String) async {
         guard let url = URL(string: "https://\(ServerConfig.shared.host)/api/user/purge") else { return }
@@ -798,3 +885,123 @@ extension SettingsView {
     }
 }
 
+// MARK: - Server Change View
+struct ServerChangeView: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var editServerHost: String
+    @Binding var serverCheckStatus: SettingsView.ServerCheckStatus
+    @Binding var serverCheckTask: Task<Void, Never>?
+    let onSave: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    TextField("server.example.com", text: $editServerHost)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                        .onChange(of: editServerHost) { oldValue, newValue in
+                            serverCheckTask?.cancel()
+                            
+                            serverCheckTask = Task {
+                                try? await Task.sleep(for: .seconds(1))
+                                if !Task.isCancelled {
+                                    await checkServer(newValue)
+                                }
+                            }
+                        }
+                } header: {
+                    Text("Server Host")
+                } footer: {
+                    if serverCheckStatus != .idle {
+                        HStack(spacing: 6) {
+                            Image(systemName: serverCheckStatus.icon)
+                            Text(serverCheckStatus.text)
+                        }
+                        .foregroundColor(serverCheckStatus.color)
+                        .font(.caption)
+                    }
+                }
+                
+                Section {
+                    Button {
+                        Task {
+                            await checkServer(editServerHost)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: serverCheckStatus.icon)
+                                .foregroundColor(serverCheckStatus.color)
+                            Text("Check Server")
+                            if serverCheckStatus == .checking {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(serverCheckStatus == .checking)
+                }
+            }
+            .navigationTitle("Change Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                    }
+                }
+            }
+            .onAppear {
+                Task {
+                    await checkServer(editServerHost)
+                }
+            }
+        }
+    }
+    
+    private func checkServer(_ host: String) async {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmed.isEmpty else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        guard trimmed.contains(".") || trimmed.contains(":") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        await MainActor.run { serverCheckStatus = .checking }
+        
+        guard let url = URL(string: "https://\(trimmed)/") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5.0
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    await MainActor.run { serverCheckStatus = .online }
+                } else {
+                    await MainActor.run { serverCheckStatus = .offline }
+                }
+            } else {
+                await MainActor.run { serverCheckStatus = .offline }
+            }
+        } catch {
+            await MainActor.run { serverCheckStatus = .offline }
+        }
+    }
+}
