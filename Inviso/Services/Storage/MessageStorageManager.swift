@@ -68,6 +68,7 @@ struct StoredMessage: Codable {
     let isFromSelf: Bool
     let messageType: MessageType // text, location, voice
     let expiresAt: Date?         // Nil for ephemeral
+    let lifetime: MessageLifetime? // Message's original lifetime (can differ from current session)
     
     enum MessageType: String, Codable {
         case text
@@ -348,11 +349,15 @@ final class MessageStorageManager {
             timestamp: message.timestamp,
             isFromSelf: message.isFromSelf,
             messageType: messageType,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            lifetime: config.lifetime
         )
         
         // Save to disk
         try saveStoredMessage(storedMessage, sessionId: sessionId)
+        
+        // Save or update config for this session (so we can retrieve lifetime later)
+        try saveStorageConfig(config)
         
         print("[MessageStorage] ✅ Saved \(messageType.rawValue) message for session \(sessionId.uuidString.prefix(8))")
     }
@@ -425,6 +430,13 @@ final class MessageStorageManager {
             message.voiceData = VoiceData.fromJSONString(plaintext)
         }
         
+        // Restore storage metadata
+        message.savedLocally = true
+        message.expiresAt = storedMessage.expiresAt
+        message.lifetime = storedMessage.lifetime // Use the message's original lifetime
+        
+        print("[MessageStorage] 📋 Restored message with lifetime: \(storedMessage.lifetime?.rawValue ?? "nil")")
+        
         return message
     }
     
@@ -462,11 +474,15 @@ final class MessageStorageManager {
     func getStorageConfig(for sessionId: UUID) -> MessageStorageConfig? {
         let configPath = storageDirectory.appendingPathComponent("\(sessionId.uuidString)_config.json")
         
+        print("[MessageStorage] 🔍 Looking for config at: \(configPath.lastPathComponent)")
+        
         guard let data = try? Data(contentsOf: configPath),
               let config = try? JSONDecoder().decode(MessageStorageConfig.self, from: data) else {
+            print("[MessageStorage] ❌ Config not found or decode failed for session \(sessionId.uuidString.prefix(8))")
             return nil
         }
         
+        print("[MessageStorage] ✅ Found config: \(config.lifetime.rawValue)")
         return config
     }
     
@@ -476,7 +492,7 @@ final class MessageStorageManager {
         let data = try JSONEncoder().encode(config)
         try data.write(to: configPath)
         
-        print("[MessageStorage] Saved config for session \(config.sessionId.uuidString.prefix(8)): \(config.lifetime.displayName)")
+        print("[MessageStorage] 💾 Saved config for session \(config.sessionId.uuidString.prefix(8)): \(config.lifetime.displayName) at \(configPath.lastPathComponent)")
     }
     
     // MARK: - Erase All Data

@@ -28,6 +28,18 @@ struct ChatView: View {
                             let index = item.offset
                             let msg = item.element
                             
+                            // Show lifetime change indicator BEFORE the message (skip for system messages)
+                            if !msg.isSystem {
+                                let previousLifetime = getPreviousNonSystemLifetime(at: index)
+                                let currentLifetime = msg.lifetime
+                                let isFirst = isFirstNonSystemMessage(at: index)
+                                
+                                if shouldShowLifetimeIndicator(current: currentLifetime, previous: previousLifetime, isFirstMessage: isFirst) {
+                                    LifetimeChangeIndicator(lifetime: currentLifetime)
+                                        .padding(.vertical, 8)
+                                }
+                            }
+                            
                             if msg.isSystem {
                                 Text(msg.text)
                                     .font(.caption)
@@ -52,8 +64,7 @@ struct ChatView: View {
                                 ChatBubble(
                                     message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp),
                                     showTime: showTime,
-                                    expiresAt: msg.expiresAt,
-                                    lifetime: msg.lifetime
+                                    chatMessage: msg
                                 )
                                     .id(msg.id)
                                     .padding(.horizontal)
@@ -71,6 +82,14 @@ struct ChatView: View {
                 .onChange(of: chat.messages.count) {
                     if let last = chat.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
                 }
+                .onAppear {
+                    // Scroll to bottom on initial load
+                    if let last = chat.messages.last {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                        }
+                    }
+                }
             }
 
         }
@@ -82,6 +101,10 @@ struct ChatView: View {
             setupLifetimeProposalObserver()
         }
         .onDisappear {
+            // If there's a pending proposal when leaving, auto-reject it
+            if showLifetimeProposal {
+                chat.rejectLifetimeProposal()
+            }
             chat.chatViewDidDisappear()
         }
         .toolbar {
@@ -207,11 +230,19 @@ struct ChatView: View {
                     peerName: proposerName,
                     onAccept: {
                         chat.acceptLifetimeProposal(proposed)
+                        showLifetimeProposal = false
                     },
                     onReject: {
                         chat.rejectLifetimeProposal()
+                        showLifetimeProposal = false
                     }
                 )
+                .onDisappear {
+                    // If dismissed without action, auto-reject
+                    if showLifetimeProposal {
+                        chat.rejectLifetimeProposal()
+                    }
+                }
             }
         }
         .sheet(isPresented: $showLocationPicker) {
@@ -347,6 +378,93 @@ struct ChatView: View {
             }
         }
     }
+    
+    private func shouldShowLifetimeIndicator(current: MessageLifetime?, previous: MessageLifetime?, isFirstMessage: Bool) -> Bool {
+        // Always show indicator for the first message if it has a lifetime
+        if isFirstMessage && current != nil {
+            return true
+        }
+        
+        // Show indicator when lifetime changes between consecutive messages
+        if current != previous {
+            return true
+        }
+        
+        return false
+    }
+    
+    private func getPreviousNonSystemLifetime(at currentIndex: Int) -> MessageLifetime? {
+        for i in (0..<currentIndex).reversed() {
+            if !chat.messages[i].isSystem {
+                return chat.messages[i].lifetime
+            }
+        }
+        return nil
+    }
+    
+    private func isFirstNonSystemMessage(at index: Int) -> Bool {
+        return index == chat.messages.firstIndex(where: { !$0.isSystem })
+    }
+}
+
+// MARK: - Lifetime Change Indicator
+
+struct LifetimeChangeIndicator: View {
+    let lifetime: MessageLifetime?
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: iconName)
+                .font(.caption2)
+            Text(displayText)
+                .font(.caption)
+                .fontWeight(.medium)
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.secondary.opacity(0.12))
+        )
+        .frame(maxWidth: .infinity)
+    }
+    
+    private var iconName: String {
+        guard let lifetime = lifetime else { return "eye.slash" }
+        switch lifetime {
+        case .ephemeral:
+            return "eye.slash"
+        case .oneHour:
+            return "clock"
+        case .sixHours:
+            return "clock.badge"
+        case .oneDay:
+            return "calendar"
+        case .sevenDays:
+            return "calendar"
+        case .thirtyDays:
+            return "calendar.badge.clock"
+        }
+    }
+    
+    private var displayText: String {
+        guard let lifetime = lifetime else { return "RAM Only Mode" }
+        switch lifetime {
+        case .ephemeral:
+            return "RAM Only Mode"
+        case .oneHour:
+            return "1 Hour Message Lifetime"
+        case .sixHours:
+            return "6 Hours Message Lifetime"
+        case .oneDay:
+            return "24 Hours Message Lifetime"
+        case .sevenDays:
+            return "7 Days Message Lifetime"
+        case .thirtyDays:
+            return "30 Days Message Lifetime"
+        }
+    }
 }
 
 
@@ -372,43 +490,62 @@ private struct DisablePopGesture: UIViewControllerRepresentable {
 struct ChatBubble: View {
     let message: MessageItem
     var showTime: Bool = true
-    var expiresAt: Date? = nil
-    var lifetime: MessageLifetime? = nil
+    let chatMessage: ChatMessage
     @State private var showCopied = false
+    @State private var showMessageDetails = false
 
     var body: some View {
         HStack(alignment: .bottom) {
             if message.isFromSelf { Spacer() }
             VStack(alignment: message.isFromSelf ? .trailing : .leading, spacing: 4) {
-                VStack(alignment: message.isFromSelf ? .trailing : .leading, spacing: 4) {
-                    Text(message.text)
-                        .padding(10)
-                        .foregroundColor(message.isFromSelf ? .white : .primary)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
-                        )
-                    
-                    // Expiration indicator for saved messages
-                    if let expiresAt = expiresAt {
-                        MessageExpirationView(expiresAt: expiresAt)
-                    }
-                }
-                .onLongPressGesture(minimumDuration: 0.3) {
-                    // Copy message instantly on long press
-                    let impactMed = UIImpactFeedbackGenerator(style: .medium)
-                    impactMed.impactOccurred()
-                    
-                    UIPasteboard.general.string = message.text
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                        showCopied = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                            showCopied = false
+                Text(message.text)
+                    .padding(10)
+                    .foregroundColor(message.isFromSelf ? .white : .primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(message.isFromSelf ? Color.accentColor : Color(UIColor.secondarySystemBackground))
+                    )
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = message.text
+                            let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                            impactMed.impactOccurred()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                showCopied = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                    showCopied = false
+                                }
+                            }
+                        } label: {
+                            Label("Copy Displayed Text", systemImage: "doc.on.doc")
+                        }
+                        
+                        Button {
+                            // Copy the raw decrypted text (what was actually received)
+                            UIPasteboard.general.string = chatMessage.text
+                            let impactMed = UIImpactFeedbackGenerator(style: .medium)
+                            impactMed.impactOccurred()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                showCopied = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                    showCopied = false
+                                }
+                            }
+                        } label: {
+                            Label("Copy Raw Decrypted Text", systemImage: "text.quote")
+                        }
+                        
+                        Button {
+                            showMessageDetails = true
+                        } label: {
+                            Label("Message Details", systemImage: "info.circle")
                         }
                     }
-                }
+                
                 if showTime {
                     Text(message.time, style: .time)
                         .font(.caption2)
@@ -437,6 +574,9 @@ struct ChatBubble: View {
                 }
             }
             if !message.isFromSelf { Spacer() }
+        }
+        .sheet(isPresented: $showMessageDetails) {
+            MessageDetailsView(message: chatMessage)
         }
     }
 }
@@ -504,5 +644,216 @@ struct SearchBarField: UIViewRepresentable {
         func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
             parent.onSubmit?()
         }
+    }
+}
+
+// MARK: - Message Details View
+
+struct MessageDetailsView: View {
+    let message: ChatMessage
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationView {
+            List {
+                Section("Message Content") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Displayed Text:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(message.text)
+                            .font(.body)
+                            .textSelection(.enabled)
+                        
+                        Button {
+                            UIPasteboard.general.string = message.text
+                        } label: {
+                            Label("Copy Displayed Text", systemImage: "doc.on.doc")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                
+                Section("Raw Decrypted Data") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("This is exactly what was decrypted from the encrypted message (before UI processing):")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        
+                        Text(message.text)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(6)
+                        
+                        Button {
+                            UIPasteboard.general.string = message.text
+                        } label: {
+                            Label("Copy Raw Decrypted Text", systemImage: "text.quote")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                
+                Section("Security") {
+                    HStack {
+                        Text("Encryption")
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.fill")
+                                .foregroundColor(.green)
+                            Text("E2EE")
+                                .foregroundColor(.green)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                    }
+                    
+                    HStack {
+                        Text("Message ID")
+                        Spacer()
+                        Text(message.id.uuidString.prefix(8))
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Section("Timing") {
+                    HStack {
+                        Text("Sent")
+                        Spacer()
+                        Text(message.timestamp, style: .date)
+                            .foregroundColor(.secondary)
+                        Text(message.timestamp, style: .time)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    if let expiresAt = message.expiresAt {
+                        HStack {
+                            Text("Expires")
+                            Spacer()
+                            if message.isExpired {
+                                Text("Expired")
+                                    .foregroundColor(.red)
+                            } else {
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text(expiresAt, style: .date)
+                                        .foregroundColor(.secondary)
+                                    Text(expiresAt, style: .time)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        
+                        if let timeRemaining = message.timeUntilExpiration, timeRemaining > 0 {
+                            HStack {
+                                Text("Time Remaining")
+                                Spacer()
+                                Text(formatTimeRemaining(timeRemaining))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                    }
+                }
+                
+                Section("Storage") {
+                    HStack {
+                        Text("Storage Mode")
+                        Spacer()
+                        if message.lifetime == .ephemeral {
+                            HStack(spacing: 4) {
+                                Image(systemName: "eye.slash")
+                                Text("RAM Only")
+                            }
+                            .foregroundColor(.secondary)
+                        } else if message.savedLocally {
+                            HStack(spacing: 4) {
+                                Image(systemName: "externaldrive.fill")
+                                Text("Encrypted Storage")
+                            }
+                            .foregroundColor(.green)
+                        } else {
+                            Text("RAM")
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    
+                    if let lifetime = message.lifetime {
+                        HStack {
+                            Text("Retention Policy")
+                            Spacer()
+                            Text(lifetimeDisplayName(lifetime))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                
+                Section("Technical Details") {
+                    Button {
+                        let jsonData = messageToJSON()
+                        UIPasteboard.general.string = jsonData
+                    } label: {
+                        Label("Copy Full Message Data (JSON)", systemImage: "curlybraces")
+                    }
+                }
+            }
+            .navigationTitle("Message Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func formatTimeRemaining(_ interval: TimeInterval) -> String {
+        let days = Int(interval) / 86400
+        let hours = Int(interval) / 3600 % 24
+        let minutes = Int(interval) / 60 % 60
+        
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+    
+    private func lifetimeDisplayName(_ lifetime: MessageLifetime) -> String {
+        switch lifetime {
+        case .ephemeral: return "RAM Only (No Persistence)"
+        case .oneHour: return "1 Hour"
+        case .sixHours: return "6 Hours"
+        case .oneDay: return "24 Hours"
+        case .sevenDays: return "7 Days"
+        case .thirtyDays: return "30 Days"
+        }
+    }
+    
+    private func messageToJSON() -> String {
+        let dict: [String: Any] = [
+            "id": message.id.uuidString,
+            "text": message.text,
+            "timestamp": ISO8601DateFormatter().string(from: message.timestamp),
+            "isFromSelf": message.isFromSelf,
+            "isSystem": message.isSystem,
+            "savedLocally": message.savedLocally,
+            "expiresAt": message.expiresAt.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull(),
+            "lifetime": message.lifetime?.rawValue ?? NSNull(),
+            "isExpired": message.isExpired,
+            "encrypted": true,
+            "protocol": "E2EE"
+        ]
+        
+        if let jsonData = try? JSONSerialization.data(withJSONObject: dict, options: .prettyPrinted),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            return jsonString
+        }
+        return "{}"
     }
 }

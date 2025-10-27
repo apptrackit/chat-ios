@@ -65,16 +65,21 @@ struct CompactLifetimeIndicator: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(
-            agreedByBoth 
+            isAgreed
                 ? Color.green.opacity(0.15)
                 : Color.orange.opacity(0.15)
         )
         .foregroundColor(
-            agreedByBoth 
+            isAgreed
                 ? .green
                 : .orange
         )
         .cornerRadius(8)
+    }
+    
+    // Ephemeral (RAM) is the default, so it's always "agreed" even if not explicitly confirmed
+    private var isAgreed: Bool {
+        agreedByBoth || lifetime == .ephemeral
     }
     
     private var shortLabel: String {
