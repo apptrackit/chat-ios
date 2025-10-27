@@ -26,7 +26,7 @@ struct AppLockView: View {
                 
                 // App Logo/Icon
                 VStack(spacing: 16) {
-                    Image(systemName: "lock.shield.fill")
+                    Image(systemName: "lock")
                         .font(.system(size: 80))
                         .foregroundStyle(.white.opacity(0.9))
                     
@@ -172,8 +172,8 @@ struct AppLockView: View {
             }
             .disabled(passcode.isEmpty)
             
-            // Try Face ID again (if available)
-            if securityManager.biometricCapability != .none {
+            // Try Face ID again (only if biometric is enabled in settings AND device has capability)
+            if securityManager.isBiometricEnabled && securityManager.biometricCapability != .none {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showPasscodeEntry = false

@@ -14,13 +14,15 @@ struct SecuredContentView<Content: View>: View {
     
     var body: some View {
         ZStack {
-            content
+            // Only show content when unlocked
+            if !securityManager.isLocked {
+                content
+            }
 
             // App lock screen when authentication is required
             if securityManager.isLocked {
                 AppLockView(securityManager: securityManager)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
-                    .zIndex(998)
+                    .zIndex(999)
             }
         }
     }

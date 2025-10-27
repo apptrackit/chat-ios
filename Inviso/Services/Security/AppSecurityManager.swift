@@ -13,7 +13,7 @@ import LocalAuthentication
 /// Centralised security coordinator that manages privacy overlay and foreground authentication.
 final class AppSecurityManager: ObservableObject {
     @Published var showPrivacyOverlay = false
-    @Published private(set) var isLocked = false
+    @Published private(set) var isLocked: Bool
     @Published private(set) var requiresPassphraseEntry = false
     @Published private(set) var shouldPromptBiometric = false
     @Published private(set) var isAttemptingBiometric = false
@@ -22,6 +22,11 @@ final class AppSecurityManager: ObservableObject {
 
     private let settingsStore = AuthenticationSettingsStore.shared
     private let passphraseManager = PassphraseManager.shared
+    
+    /// Whether biometric authentication is enabled in settings
+    var isBiometricEnabled: Bool {
+        settingsStore.settings.mode.requiresBiometrics
+    }
     private var cancellables = Set<AnyCancellable>()
     private var biometricTask: Task<Void, Never>?
     private var biometricSatisfied = false
@@ -32,12 +37,16 @@ final class AppSecurityManager: ObservableObject {
     private static let unlockReason = "Unlock to access protected chats"
 
     init() {
+        // Start locked if authentication is required
+        let authRequired = AuthenticationSettingsStore.shared.settings.mode != .disabled
+        self.isLocked = authRequired
+        
         biometricCapability = BiometricAuth.shared.capability()
         setupNotificationObservers()
         observeSettingsChanges()
-        DispatchQueue.main.async { [weak self] in
-            self?.evaluateLockIfNeeded()
-        }
+        
+        // Immediately evaluate and update lock state if needed
+        evaluateLockIfNeeded()
     }
 
     deinit {
