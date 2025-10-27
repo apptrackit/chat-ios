@@ -160,7 +160,14 @@ struct AppLockView: View {
             
             // Submit button
             Button {
-                submitPasscode()
+                // Dismiss keyboard immediately
+                isPasscodeFocused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                
+                // Small delay to allow keyboard to start dismissing before processing
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    submitPasscode()
+                }
             } label: {
                 Text("Unlock")
                     .font(.system(size: 16, weight: .semibold))
