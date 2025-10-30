@@ -2,7 +2,7 @@
 //  CreateRoomModal.swift
 //  Inviso
 //
-//  Handles creating new rooms with names, durations, and QR code sharing
+//  Handles creating new contacts with names, durations, and QR code sharing
 //
 
 import SwiftUI
@@ -10,7 +10,7 @@ import SwiftUI
 struct CreateRoomModal: View {
     @EnvironmentObject private var chat: ChatManager
     @Binding var isPresented: Bool
-    @State private var roomName: String = ""
+    @State private var contactName: String = ""
     @State private var durationMinutes: Int = 5
     @FocusState private var createNameFocused: Bool
     @State private var showCreateResult = false
@@ -29,23 +29,31 @@ struct CreateRoomModal: View {
                     withAnimation(.spring()) { isPresented = false }
                 }
 
-            VStack(spacing: 14) {
+            VStack(spacing: 18) {
                 if !showCreatedQRCode {
                     if showCreateResult == false {
-                        Text("Create Room")
-                            .font(.headline)
-                            .foregroundColor(.primary)
+                        VStack(spacing: 6) {
+                            Text("New Contact")
+                                .font(.title2.weight(.bold))
+                                .foregroundColor(.primary)
+                            
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 8)
+                        }
+                        .padding(.bottom, 4)
 
-                    // Room name
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Name")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        TextField("Optional room name", text: $roomName)
+                    // Contact name
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Contact Name")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
+                        TextField("Name of your contact", text: $contactName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .focused($createNameFocused)
-                            .padding(10)
+                            .padding(12)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(.ultraThinMaterial)
@@ -56,18 +64,18 @@ struct CreateRoomModal: View {
                             )
                     }
 
-                    // Duration (fixed options)
+                    // Message lifetime (fixed options)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Expires in")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        Text("Join code expires in")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
                         HStack(spacing: 8) {
                             ForEach([1, 5, 60, 720, 1440], id: \.self) { preset in
                                 Button(action: { durationMinutes = preset }) {
                                     Text(preset < 60 ? "\(preset)m" : (preset % 60 == 0 ? "\(preset/60)h" : "\(preset)m"))
                                         .font(.caption.weight(.semibold))
-                                        .padding(.vertical, 6)
-                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .padding(.horizontal, 14)
                                         .background(
                                             Capsule().fill(preset == durationMinutes ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.12))
                                         )
@@ -75,12 +83,9 @@ struct CreateRoomModal: View {
                                 .buttonStyle(.plain)
                             }
                         }
-                        Text(formatDuration(durationMinutes))
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
                     }
 
-                    HStack(spacing: 20) {
+                    HStack(spacing: 12) {
                         Button("Cancel", role: .cancel) {
                             createNameFocused = false
                             endEditing()
@@ -91,120 +96,139 @@ struct CreateRoomModal: View {
                             createNameFocused = false
                             endEditing()
                             createdCode = String((0..<6).map { _ in String(Int.random(in: 0...9)) }.joined())
-                            _ = chat.createSession(name: roomName.isEmpty ? nil : roomName, minutes: durationMinutes, code: createdCode)
+                            _ = chat.createSession(name: contactName.isEmpty ? nil : contactName, minutes: durationMinutes, code: createdCode)
                             withAnimation(.spring()) { showCreateResult = true }
                         } label: {
-                            Text("Create")
+                            Text("Create Contact")
                                 .fontWeight(.semibold)
                         }
                         .buttonStyle(.glass)
                     }
+                    .padding(.top, 4)
                     } else {
                         // Result: show code + copy
-                        Text("Room Created")
-                            .font(.headline)
-                            .foregroundColor(.primary)
-                        
-                        if roomName.isEmpty == false {
-                            Text("\(roomName)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        HStack(spacing: 8) {
-                            ForEach(0..<6, id: \.self) { idx in
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(.ultraThinMaterial)
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .strokeBorder(Color.white.opacity(0.15))
-                                    Text(String(createdCode[createdCode.index(createdCode.startIndex, offsetBy: idx)]))
-                                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        VStack(spacing: 16) {
+                            VStack(spacing: 6) {
+                                Text("Contact Ready!")
+                                    .font(.title2.weight(.bold))
+                                    .foregroundColor(.primary)
+                                
+                                Text("Share this code with them to connect")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 8)
+                            }
+                            
+                            HStack(spacing: 8) {
+                                ForEach(0..<6, id: \.self) { idx in
+                                    ZStack {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(.ultraThinMaterial)
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.15))
+                                        Text(String(createdCode[createdCode.index(createdCode.startIndex, offsetBy: idx)]))
+                                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                                    }
+                                    .frame(width: 48, height: 56)
                                 }
-                                .frame(width: 48, height: 56)
                             }
-                        }
-                        
-                        Button {
-                            UIPasteboard.general.string = createdCode
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                showCopied = true
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            .padding(.vertical, 4)
+                            
+                            Button {
+                                UIPasteboard.general.string = createdCode
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
-                                    showCopied = false
+                                    showCopied = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                        showCopied = false
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: showCopied ? "checkmark.circle.fill" : "doc.on.doc")
+                                        .font(.body.weight(.semibold))
+                                        .contentTransition(.symbolEffect(.replace))
+                                    Text(showCopied ? "Copied!" : "Copy Code")
+                                        .font(.body.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
+                            
+                            Button {
+                                withAnimation(.spring()) { showCreatedQRCode = true }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "qrcode")
+                                        .font(.body.weight(.semibold))
+                                    Text("Show QR Code")
+                                        .font(.body.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
+
+                            Button("Done") {
+                                withAnimation(.spring()) {
+                                    isPresented = false
+                                    showCreateResult = false
+                                    contactName = ""
+                                    durationMinutes = 5
+                                    createdCode = ""
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
-                                    .font(.body.weight(.semibold))
-                                    .contentTransition(.symbolEffect(.replace))
-                                Text(showCopied ? "Copied!" : "Copy code")
-                                    .font(.body.weight(.semibold))
-                            }
+                            .padding(.top, 4)
                         }
-                        .buttonStyle(.glass)
-                        .padding(.top, 6)
-                        
-                        Button {
-                            withAnimation(.spring()) { showCreatedQRCode = true }
-                        } label: {
-                            Label("Show QR", systemImage: "qrcode")
-                                .font(.body.weight(.semibold))
-                        }
-                        .buttonStyle(.glass)
-                        .padding(.top, 2)
-
-                        Button("Done") {
-                            withAnimation(.spring()) {
-                                isPresented = false
-                                showCreateResult = false
-                                roomName = ""
-                                durationMinutes = 5
-                                createdCode = ""
-                            }
-                        }
-                        .padding(.top, 4)
                     }
                 } else {
                     // QR Code View
-                    Text("Share Join Code")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    if createdCode.count == 6 {
-                        QRCodeView(value: "inviso://join/\(createdCode)", size: 260)
-                            .padding(12)
-                            .background(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .fill(Color.white)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                    .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
-                            )
-                            .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+                    VStack(spacing: 16) {
+                        VStack(spacing: 6) {
+                            Text("Share Connection Code")
+                                .font(.title2.weight(.bold))
+                                .foregroundColor(.primary)
+                            
+                            Text("Have them scan this QR code to connect")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                         
-                        Text(createdCode)
-                            .font(.system(.title3, design: .monospaced).weight(.semibold))
-                            .foregroundColor(.primary)
-                            .padding(.top, 8)
+                        if createdCode.count == 6 {
+                            QRCodeView(value: "inviso://join/\(createdCode)", size: 260)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                        .fill(Color.white)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                        .strokeBorder(Color.black.opacity(0.06), lineWidth: 1)
+                                )
+                                .shadow(color: .black.opacity(0.08), radius: 12, x: 0, y: 4)
+                            
+                            Text(createdCode)
+                                .font(.system(.title2, design: .monospaced).weight(.bold))
+                                .foregroundColor(.primary)
+                                .padding(.top, 4)
+                            
+                            if contactName.isEmpty == false {
+                                Text(contactName)
+                                    .font(.headline)
+                                    .foregroundColor(.accentColor)
+                            }
+                        } else {
+                            ProgressView()
+                                .padding()
+                        }
                         
-                        Text("inviso://join/\(createdCode)")
-                            .font(.caption.monospaced())
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    } else {
-                        ProgressView()
-                            .padding()
+                        Button("Back") {
+                            withAnimation(.spring()) { showCreatedQRCode = false }
+                        }
+                        .padding(.top, 8)
                     }
-                    
-                    Button("Back") {
-                        withAnimation(.spring()) { showCreatedQRCode = false }
-                    }
-                    .padding(.top, 4)
                 }
             }
             .padding(18)
@@ -230,7 +254,7 @@ struct CreateRoomModal: View {
                         isPresented = false
                         showCreateResult = false
                         showCreatedQRCode = false
-                        roomName = ""
+                        contactName = ""
                         durationMinutes = 5
                         createdCode = ""
                     }

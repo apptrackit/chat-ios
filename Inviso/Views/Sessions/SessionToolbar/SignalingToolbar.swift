@@ -18,6 +18,17 @@ struct SignalingToolbar: ViewModifier {
         ZStack {
             content
             
+            // Tap overlay to close expanded toolbar
+            if isExpanded {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring()) {
+                            isExpanded = false
+                        }
+                    }
+            }
+            
             // Deep Link Join Modal
             if let code = chat.pendingDeepLinkCode {
                 DeepLinkJoinModal(
