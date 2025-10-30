@@ -51,36 +51,36 @@ struct SignalingToolbar: ViewModifier {
                 .accessibilityLabel("Settings")
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if isExpanded {
+                    Button {
+                        withAnimation(.spring()) {
+                            guard chat.connectionStatus == .connected else { return }
+                            showJoinPopup = true
+                            isExpanded = false
+                        }
+                    } label: {
+                        Image(systemName: "qrcode.viewfinder")
+                    }
+                    .accessibilityLabel("Join")
+                    .disabled(chat.connectionStatus != .connected)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+                
                 Button {
                     withAnimation(.spring()) {
                         guard chat.connectionStatus == .connected else { return }
                         if isExpanded { 
-                            showJoinPopup = true
+                            showCreatePopup = true
                             isExpanded = false 
                         } else { 
                             isExpanded = true 
                         }
                     }
                 } label: {
-                    Image(systemName: "qrcode.viewfinder")
+                    Image(systemName: "plus")
                 }
-                .accessibilityLabel("Join")
+                .accessibilityLabel(isExpanded ? "Create" : "Show actions")
                 .disabled(chat.connectionStatus != .connected)
-
-                if isExpanded {
-                    Button {
-                        withAnimation(.spring()) {
-                            guard chat.connectionStatus == .connected else { return }
-                            showCreatePopup = true
-                            isExpanded = false
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Create")
-                    .disabled(chat.connectionStatus != .connected)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
