@@ -49,7 +49,7 @@ struct CreateRoomModal: View {
                         Text("Contact Name")
                             .font(.subheadline.weight(.medium))
                             .foregroundColor(.primary)
-                        TextField("Name of you contact", text: $contactName)
+                        TextField("Name of your contact", text: $contactName)
                             .textInputAutocapitalization(.words)
                             .autocorrectionDisabled()
                             .focused($createNameFocused)
