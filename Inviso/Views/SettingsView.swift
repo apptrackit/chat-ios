@@ -69,20 +69,21 @@ struct SettingsView: View {
         Form {
             Section(header: Label("Privacy", systemImage: "lock.shield.fill")) {
                 NavigationLink {
-                    EphemeralIDsView()
+                    ManageContactsView()
+                        .environmentObject(chat)
                 } label: {
                     HStack {
-                        Image(systemName: "person.badge.key.fill")
+                        Image(systemName: "person.2.fill")
                             .foregroundColor(.blue)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Session Identities")
-                            Text("Each session uses a unique, ephemeral ID")
+                            Text("Manage Contacts")
+                            Text("View all sessions and encrypted chat details")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        let count = DeviceIDManager.shared.getEphemeralIDs().count
+                        let count = chat.sessions.count
                         if count > 0 {
                             Text("\(count)")
                                 .font(.caption.weight(.semibold))

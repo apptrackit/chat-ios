@@ -222,6 +222,8 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showLifetimeSettings) {
             MessageLifetimeSettingsView(chatManager: chat)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showLifetimeProposal) {
             if let proposed = proposedLifetime {

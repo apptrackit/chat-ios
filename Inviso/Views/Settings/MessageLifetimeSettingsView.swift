@@ -2,8 +2,8 @@
 //  MessageLifetimeSettingsView.swift
 //  Inviso
 //
-//  Message retention settings screen
-//  Only enabled when connected to peer
+//  Message retention settings popup - clean and minimal
+//  One-tap to propose changes to peer
 //
 //  Created by GitHub Copilot on 10/26/25.
 //
@@ -14,127 +14,120 @@ struct MessageLifetimeSettingsView: View {
     @ObservedObject var chatManager: ChatManager
     @Environment(\.dismiss) private var dismiss
     
-    @State private var selectedLifetime: MessageLifetime
-    @State private var showingProposalConfirmation = false
     @State private var showingError = false
     @State private var errorMessage = ""
     
-    init(chatManager: ChatManager) {
-        self.chatManager = chatManager
-        // Initialize with current session's lifetime or default to ephemeral
-        let currentLifetime = chatManager.activeSession?.messageLifetime ?? .ephemeral
-        _selectedLifetime = State(initialValue: currentLifetime)
+    private let lifetimeOptions: [MessageLifetime] = [
+        .ephemeral, .oneHour, .sixHours, .oneDay, .sevenDays, .thirtyDays
+    ]
+    
+    private var currentLifetime: MessageLifetime {
+        chatManager.activeSession?.messageLifetime ?? .ephemeral
+    }
+    
+    private var isAgreed: Bool {
+        chatManager.activeSession?.lifetimeAgreedByBoth ?? false
     }
     
     var body: some View {
-        NavigationView {
-            Form {
-                Section {
-                    if !chatManager.isP2PConnected {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundColor(.orange)
-                            Text("Connect to a peer to configure message retention")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 4)
-                    } else if let session = chatManager.activeSession {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Connected to: \(session.displayName)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            
-                            if session.lifetimeAgreedByBoth {
-                                HStack {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
-                                    Text("Both peers agreed")
-                                        .font(.caption)
-                                        .foregroundColor(.green)
-                                }
-                            } else {
-                                HStack {
-                                    Image(systemName: "clock")
-                                        .foregroundColor(.orange)
-                                    Text("Waiting for peer confirmation")
-                                        .font(.caption)
-                                        .foregroundColor(.orange)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                } header: {
-                    Text("Connection Status")
-                }
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Message Retention")
+                    .font(.title2)
+                    .fontWeight(.bold)
                 
-                Section {
-                    ForEach([MessageLifetime.ephemeral, .oneHour, .sixHours, .oneDay, .sevenDays, .thirtyDays], id: \.self) { lifetime in
-                        LifetimeOptionRow(
-                            lifetime: lifetime,
-                            isSelected: selectedLifetime == lifetime,
-                            isCurrent: chatManager.activeSession?.messageLifetime == lifetime && (chatManager.activeSession?.lifetimeAgreedByBoth ?? false)
-                        ) {
-                            selectedLifetime = lifetime
-                        }
-                        .disabled(!chatManager.isP2PConnected)
-                    }
-                } header: {
-                    Text("Retention Policy")
-                } footer: {
-                    Text("Messages will be automatically deleted after the selected time. Both peers must agree on the retention policy.")
-                        .font(.caption)
-                }
+                Spacer()
                 
-                if chatManager.isP2PConnected && selectedLifetime != chatManager.activeSession?.messageLifetime {
-                    Section {
-                        Button {
-                            showingProposalConfirmation = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "paperplane.fill")
-                                Text("Propose to Peer")
-                                    .fontWeight(.semibold)
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .padding()
+            
+            if !chatManager.isP2PConnected {
+                // Not connected state
+                VStack(spacing: 16) {
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 50))
+                        .foregroundStyle(.secondary)
+                    
+                    Text("Not Connected")
+                        .font(.headline)
+                    
+                    Text("Connect to a peer first")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
+                // Connected - show options
+                ScrollView {
+                    VStack(spacing: 12) {
+                        // Current status indicator
+                        if isAgreed {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("Active: \(currentLifetime.displayName)")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
                             }
                             .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(8)
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock")
+                                    .foregroundStyle(.orange)
+                                Text("Pending agreement")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.orange.opacity(0.1))
+                            .cornerRadius(8)
                         }
-                        .buttonStyle(.borderedProminent)
+                        
+                        Divider()
+                            .padding(.vertical, 4)
+                        
+                        // Lifetime options - tappable cards
+                        ForEach(lifetimeOptions, id: \.self) { lifetime in
+                            LifetimeCard(
+                                lifetime: lifetime,
+                                isCurrent: currentLifetime == lifetime && isAgreed,
+                                onTap: {
+                                    if currentLifetime != lifetime {
+                                        proposeLifetime(lifetime)
+                                    }
+                                }
+                            )
+                            .disabled(!chatManager.isP2PConnected)
+                        }
                     }
+                    .padding()
                 }
             }
-            .navigationTitle("Message Retention")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-            .confirmationDialog(
-                "Propose Retention Change",
-                isPresented: $showingProposalConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Propose \(selectedLifetime.displayName)") {
-                    proposeLifetime()
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Ask your peer to accept '\(selectedLifetime.displayName)' retention policy?")
-            }
-            .alert("Error", isPresented: $showingError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(errorMessage)
-            }
+        }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
         }
     }
     
-    private func proposeLifetime() {
+    private func proposeLifetime(_ lifetime: MessageLifetime) {
         do {
-            try chatManager.proposeMessageLifetime(selectedLifetime)
+            try chatManager.proposeMessageLifetime(lifetime)
             dismiss()
         } catch {
             errorMessage = error.localizedDescription
@@ -143,49 +136,81 @@ struct MessageLifetimeSettingsView: View {
     }
 }
 
-struct LifetimeOptionRow: View {
+// Clean card design for each lifetime option
+struct LifetimeCard: View {
     let lifetime: MessageLifetime
-    let isSelected: Bool
     let isCurrent: Bool
-    let action: () -> Void
+    let onTap: () -> Void
     
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
+        Button(action: onTap) {
+            HStack(spacing: 16) {
+                // Icon
                 Image(systemName: lifetime.icon)
-                    .font(.title3)
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-                    .frame(width: 30)
+                    .font(.title2)
+                    .foregroundStyle(isCurrent ? .green : .accentColor)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(isCurrent ? Color.green.opacity(0.15) : Color.accentColor.opacity(0.15))
+                    )
                 
+                // Text
                 VStack(alignment: .leading, spacing: 2) {
                     Text(lifetime.displayName)
-                        .font(.body)
-                        .foregroundColor(.primary)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
                     
-                    Text(lifetime.description)
+                    Text(lifetime.shortDescription)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 
                 Spacer()
                 
+                // Status indicator
                 if isCurrent {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                } else if isSelected {
-                    Image(systemName: "circle.fill")
-                        .foregroundColor(.accentColor)
-                        .font(.caption)
+                        .font(.title3)
+                        .foregroundStyle(.green)
                 }
             }
-            .contentShape(Rectangle())
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isCurrent ? Color.green.opacity(0.05) : Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(
+                                isCurrent ? Color.green.opacity(0.3) : Color(.separator).opacity(0.5),
+                                lineWidth: 1
+                            )
+                    )
+            )
         }
         .buttonStyle(.plain)
     }
 }
 
-// Extension for MessageLifetime descriptions
+// Shorter descriptions for cleaner UI
 extension MessageLifetime {
+    var shortDescription: String {
+        switch self {
+        case .ephemeral:
+            return "Delete on exit"
+        case .oneHour:
+            return "1 hour"
+        case .sixHours:
+            return "6 hours"
+        case .oneDay:
+            return "24 hours"
+        case .sevenDays:
+            return "1 week"
+        case .thirtyDays:
+            return "1 month"
+        }
+    }
+    
     var description: String {
         switch self {
         case .ephemeral:

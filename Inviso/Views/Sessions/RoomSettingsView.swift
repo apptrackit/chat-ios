@@ -315,6 +315,8 @@ struct RoomSettingsView: View {
         }
         .sheet(isPresented: $showLifetimeSettings) {
             MessageLifetimeSettingsView(chatManager: chat)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
     

@@ -189,11 +189,6 @@ struct CreateRoomModal: View {
                             Text("Share Connection Code")
                                 .font(.title2.weight(.bold))
                                 .foregroundColor(.primary)
-                            
-                            Text("Have them scan this QR code to connect")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
                         }
                         
                         if createdCode.count == 6 {
@@ -213,12 +208,7 @@ struct CreateRoomModal: View {
                                 .font(.system(.title2, design: .monospaced).weight(.bold))
                                 .foregroundColor(.primary)
                                 .padding(.top, 4)
-                            
-                            if contactName.isEmpty == false {
-                                Text(contactName)
-                                    .font(.headline)
-                                    .foregroundColor(.accentColor)
-                            }
+
                         } else {
                             ProgressView()
                                 .padding()
