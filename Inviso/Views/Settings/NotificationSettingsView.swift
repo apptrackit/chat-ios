@@ -253,9 +253,7 @@ struct NotificationSettingsView: View {
     }
     
     private func openSettings() {
-        Task {
-            await pushManager.openNotificationSettings()
-        }
+        pushManager.openNotificationSettings()
     }
 }
 

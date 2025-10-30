@@ -1,5 +1,5 @@
 import Foundation
-import LocalAuthentication
+@preconcurrency import LocalAuthentication
 
 enum BiometricCapability {
     case none
@@ -32,7 +32,7 @@ enum BiometricCapability {
 }
 
 enum BiometricAuthResult {
-    case success
+    case success(LAContext?)  // Include authenticated context for reuse
     case cancelled
     case fallback
     case failed(LAError.Code)
@@ -68,9 +68,12 @@ final class BiometricAuth {
         let policy: LAPolicy = allowDevicePasscode ? .deviceOwnerAuthentication : .deviceOwnerAuthenticationWithBiometrics
 
         return await withCheckedContinuation { continuation in
-            context.evaluatePolicy(policy, localizedReason: reason) { success, error in
+            // Capture context locally to avoid Sendable warnings
+            let capturedContext = context
+            capturedContext.evaluatePolicy(policy, localizedReason: reason) { success, error in
                 if success {
-                    continuation.resume(returning: .success)
+                    // Return the authenticated context for reuse
+                    continuation.resume(returning: .success(capturedContext))
                     return
                 }
 

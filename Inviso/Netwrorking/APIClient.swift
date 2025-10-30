@@ -129,6 +129,26 @@ final class APIClient {
         }
     }
 
+    // MARK: - Badge Management
+    
+    func resetBadgeCount(deviceId: String) async {
+        var request = URLRequest(url: apiBase.appendingPathComponent("/api/badge/reset"))
+        request.httpMethod = "POST"
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["deviceId": deviceId])
+        
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                print("[APIClient] ✅ Badge reset successful on server")
+            } else {
+                print("[APIClient] ⚠️ Badge reset returned non-200 status")
+            }
+        } catch {
+            print("[APIClient] ❌ Badge reset error: \(error)")
+        }
+    }
+
     // MARK: - Room Status Check
 
     enum RoomStatus {

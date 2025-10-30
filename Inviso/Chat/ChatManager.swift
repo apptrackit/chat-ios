@@ -11,6 +11,7 @@ import WebRTC
 import Combine
 import CryptoKit
 import UIKit
+import UserNotifications
 
 @MainActor
 class ChatManager: NSObject, ObservableObject {
@@ -28,6 +29,7 @@ class ChatManager: NSObject, ObservableObject {
     
     // Push notification navigation trigger
     @Published var shouldNavigateToChat: Bool = false
+    @Published var shouldNavigateToSessions: Bool = false
     
     // Encryption (E2EE)
     @Published var isEncryptionReady: Bool = false // True when key exchange completes and encryption is active
@@ -49,6 +51,15 @@ class ChatManager: NSObject, ObservableObject {
     private var currentSessionKeyId: UUID?
     // Queue for received key_exchange messages before our keypair is ready
     private var pendingPeerPublicKey: (publicKey: String, sessionId: String)?
+    
+    // Message storage components
+    private let storage = MessageStorageManager.shared
+    private let cleanup = MessageCleanupService.shared
+    
+    // Lifetime proposal tracking
+    private var pendingProposedLifetime: MessageLifetime?
+    private var lifetimeBeforeProposal: MessageLifetime?
+    private var agreedByBothBeforeProposal: Bool?
 
     // State
     private var clientId: String?
@@ -78,12 +89,43 @@ class ChatManager: NSObject, ObservableObject {
         setupKeyExchangeObservers()
         setupAppLifecycleObservers()
         setupPushNotificationObservers()
+        
+        // Start automatic message cleanup
+        cleanup.startPeriodicCleanup()
+        
+        // Initialize storage with passphrase if available
+        initializeStorageIfNeeded()
+        
+        // Sync pending notifications from Notification Service Extension
+        syncPendingNotifications()
+        
+        // Clean up old notifications on init
+        clearOldNotifications()
+        
+        // Clear notification center (cards) but keep badge
+        clearNotificationCenter()
     }
 
     deinit {
         // Note: disconnect/close are @MainActor isolated but deinit is nonisolated.
         // This is acceptable for cleanup as the object is being destroyed.
         // The methods will be called synchronously on deallocation.
+    }
+    
+    // MARK: - Storage Initialization
+    
+    private func initializeStorageIfNeeded() {
+        // Check if user has set up a passphrase
+        guard PassphraseManager.shared.hasPassphrase else {
+            print("ℹ️ No passphrase set - message storage disabled")
+            return
+        }
+        
+        // Try to unlock storage with existing passphrase
+        // This requires the PassphraseManager to provide access to the passphrase
+        // Since PassphraseManager doesn't expose the passphrase directly (for security),
+        // storage will be unlocked when user authenticates via biometric or manual entry
+        print("ℹ️ Passphrase exists - storage will unlock after authentication")
     }
 
     // Public API
@@ -132,6 +174,43 @@ class ChatManager: NSObject, ObservableObject {
         self.roomId = roomId
         // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
         
+        // Load stored messages if storage is unlocked
+        // NOTE: Load messages regardless of current mode because:
+        // - Messages have individual expiration times
+        // - Old messages sent with "30 days" should appear even if mode is now "ephemeral"
+        // - Only new messages respect the current mode
+        print("🔍 joinRoom - checking message loading conditions:")
+        print("  - Found session: \(sessions.first(where: { $0.roomId == roomId }) != nil)")
+        if let session = sessions.first(where: { $0.roomId == roomId }) {
+            print("  - Session lifetime: \(session.messageLifetime)")
+            print("  - Current mode ephemeral: \(session.messageLifetime == .ephemeral)")
+        }
+        print("  - Storage unlocked: \(storage.isUnlocked)")
+        
+        if let session = sessions.first(where: { $0.roomId == roomId }),
+           storage.isUnlocked {
+            do {
+                let storedMessages = try storage.loadMessages(for: session.id)
+                print("📦 Found \(storedMessages.count) stored messages in database")
+                // Decrypt and convert to ChatMessage
+                var loadedCount = 0
+                for storedMessage in storedMessages {
+                    if let chatMessage = try? storage.decryptMessage(storedMessage) {
+                        print("📦 Loaded message: lifetime=\(chatMessage.lifetime?.rawValue ?? "nil"), expiresAt=\(chatMessage.expiresAt?.description ?? "nil"), savedLocally=\(chatMessage.savedLocally)")
+                        messages.append(chatMessage)
+                        loadedCount += 1
+                    } else {
+                        print("⚠️ Failed to decrypt stored message: \(storedMessage.id)")
+                    }
+                }
+                print("📦 Successfully loaded \(loadedCount) stored messages for session")
+            } catch {
+                print("⚠️ Failed to load stored messages: \(error)")
+            }
+        } else {
+            print("⚠️ Skipping message load - conditions not met")
+        }
+        
         // Find the session's ephemeral device ID to send to backend for push notification matching
         let deviceId = sessions.first(where: { $0.roomId == roomId })?.ephemeralDeviceId
         
@@ -151,12 +230,22 @@ class ChatManager: NSObject, ObservableObject {
             wasInRoomBeforeDisconnect = nil
         }
         guard !roomId.isEmpty else { return }
+        
+        // NOTE: We do NOT delete stored messages on leave.
+        // Messages expire based on their individual expiresAt timestamps.
+        // If user sent messages with "30 days" auto-delete, they stay for 30 days
+        // even if they later switch to "ephemeral" mode for new messages.
+        // The MessageCleanupService will delete expired messages automatically.
+        
     messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
     remotePeerPresent = false
         hadP2POnce = false
+        
+        // Invalidate any pending lifetime proposals (without system message since we're leaving)
+        invalidatePendingProposals(addSystemMessage: false)
         
         // Clean up encryption for this session
         cleanupEncryption()
@@ -235,7 +324,38 @@ class ChatManager: NSObject, ObservableObject {
             // Send encrypted binary data over DataChannel
             let ok = pcm.sendData(jsonData)
             if ok {
-                messages.append(ChatMessage(text: text, timestamp: Date(), isFromSelf: true))
+                var message = ChatMessage(text: text, timestamp: Date(), isFromSelf: true)
+                
+                // Always set lifetime metadata from session (for UI display)
+                if let session = activeSession {
+                    message.lifetime = session.messageLifetime
+                    if let seconds = session.messageLifetime.seconds {
+                        message.expiresAt = Date().addingTimeInterval(seconds)
+                    }
+                    
+                    // Save message if storage is unlocked and session has non-ephemeral lifetime
+                    if session.messageLifetime != .ephemeral && storage.isUnlocked {
+                        do {
+                            // Create storage config
+                            let config = MessageStorageConfig(
+                                sessionId: session.id,
+                                lifetime: session.messageLifetime,
+                                agreedAt: session.lifetimeAgreedAt ?? Date(),
+                                agreedByBoth: session.lifetimeAgreedByBoth
+                            )
+                            
+                            try storage.saveMessage(message, sessionId: session.id, config: config)
+                            message.savedLocally = true
+                            
+                            print("💾 Saved message to storage")
+                        } catch {
+                            print("⚠️ Failed to save message: \(error)")
+                        }
+                    }
+                }
+                
+                messages.append(message)
+                
                 // Update activity for active session
                 if let sessionId = activeSessionId {
                     updateSessionActivity(sessionId)
@@ -244,6 +364,440 @@ class ChatManager: NSObject, ObservableObject {
         } catch {
             print("❌ Failed to encrypt message: \(error)")
         }
+    }
+    
+    func sendLocation(_ location: LocationData) {
+        guard isP2PConnected else { return }
+        guard isEncryptionReady else {
+            print("⚠️ Encryption not ready, cannot send location")
+            return
+        }
+        
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            print("⚠️ No encryption state for current room")
+            return
+        }
+        
+        // Convert location to JSON string
+        guard let locationJSON = location.toJSONString() else {
+            print("❌ Failed to serialize location data")
+            return
+        }
+        
+        do {
+            print("📍 [E2EE] Sending location: \(location.latitude), \(location.longitude)")
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the location JSON
+            let wireFormat = try messageEncryptor.encrypt(
+                locationJSON,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(wireFormat)
+            
+            print("📦 [E2EE] Encrypted location data (\(jsonData.count) bytes)")
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonData)
+            if ok {
+                // Add location message to local chat
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: true)
+                msg.locationData = location
+                messages.append(msg)
+                
+                // Update activity for active session
+                if let sessionId = activeSessionId {
+                    updateSessionActivity(sessionId)
+                }
+            }
+        } catch {
+            print("❌ Failed to encrypt location: \(error)")
+        }
+    }
+    
+    func sendVoice(_ voice: VoiceData) {
+        guard isP2PConnected else { return }
+        guard isEncryptionReady else {
+            print("⚠️ Encryption not ready, cannot send voice")
+            return
+        }
+        
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            print("⚠️ No encryption state for current room")
+            return
+        }
+        
+        // Convert voice to JSON string
+        guard let voiceJSON = voice.toJSONString() else {
+            print("❌ Failed to serialize voice data")
+            return
+        }
+        
+        do {
+            print("🎤 [E2EE] Sending voice message: \(voice.duration)s")
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the voice JSON
+            let wireFormat = try messageEncryptor.encrypt(
+                voiceJSON,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(wireFormat)
+            
+            print("📦 [E2EE] Encrypted voice data (\(jsonData.count) bytes)")
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonData)
+            if ok {
+                // Add voice message to local chat
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: true)
+                msg.voiceData = voice
+                messages.append(msg)
+                
+                // Update activity for active session
+                if let sessionId = activeSessionId {
+                    updateSessionActivity(sessionId)
+                }
+            }
+        } catch {
+            print("❌ Failed to encrypt voice: \(error)")
+        }
+    }
+    
+    // MARK: - Message Lifetime Management
+    
+    /// Propose a message lifetime change to the peer
+    func proposeMessageLifetime(_ lifetime: MessageLifetime) throws {
+        guard isP2PConnected else {
+            throw NSError(domain: "ChatManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Not connected to peer"])
+        }
+        guard isEncryptionReady else {
+            throw NSError(domain: "ChatManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Encryption not ready"])
+        }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else {
+            throw NSError(domain: "ChatManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "No encryption state"])
+        }
+        
+        do {
+            // Create proposal message
+            let proposal = LifetimeProposalMessage(
+                sessionId: roomId,
+                lifetime: lifetime.rawValue
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(proposal)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the proposal
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonPayload)
+            if ok {
+                print("📤 Sent lifetime proposal: \(lifetime.displayName)")
+                
+                // Store the pending proposal and current lifetime (so we can revert if rejected)
+                if let sessionId = activeSessionId,
+                   let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    lifetimeBeforeProposal = sessions[sessionIndex].messageLifetime
+                    agreedByBothBeforeProposal = sessions[sessionIndex].lifetimeAgreedByBoth
+                    pendingProposedLifetime = lifetime
+                    
+                    // Update session to show proposed lifetime as pending (orange)
+                    sessions[sessionIndex].messageLifetime = lifetime
+                    sessions[sessionIndex].lifetimeAgreedByBoth = false
+                    persistSessions()
+                    
+                    print("💾 Saved current lifetime (\(lifetimeBeforeProposal?.rawValue ?? "nil"), agreed: \(agreedByBothBeforeProposal ?? false)) and set proposal as pending")
+                }
+            }
+        } catch {
+            throw error
+        }
+    }
+    
+    /// Accept a lifetime proposal from peer
+    func acceptLifetimeProposal(_ lifetime: MessageLifetime) {
+        guard isP2PConnected, isEncryptionReady else { return }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else { return }
+        
+        do {
+            // Create accept message
+            let accept = LifetimeAcceptMessage(
+                sessionId: roomId,
+                lifetime: lifetime.rawValue
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(accept)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the accept
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            let ok = pcm.sendData(jsonPayload)
+            if ok {
+                print("✅ Accepted lifetime proposal: \(lifetime.displayName)")
+                
+                // Update local session
+                if let sessionId = activeSessionId,
+                   let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    sessions[sessionIndex].messageLifetime = lifetime
+                    sessions[sessionIndex].lifetimeAgreedAt = Date()
+                    sessions[sessionIndex].lifetimeAgreedByBoth = true
+                    persistSessions()
+                    
+                    // Add system message
+                    messages.append(ChatMessage(
+                        text: "Auto-delete changed to \(lifetime.displayName)",
+                        timestamp: Date(),
+                        isFromSelf: false,
+                        isSystem: true
+                    ))
+                }
+            }
+        } catch {
+            print("❌ Failed to send accept: \(error)")
+        }
+    }
+    
+    /// Reject a lifetime proposal from peer
+    func rejectLifetimeProposal() {
+        guard isP2PConnected, isEncryptionReady else { return }
+        guard var state = encryptionStates[roomId],
+              let sessionKeyId = currentSessionKeyId else { return }
+        
+        do {
+            // Create reject message
+            let reject = LifetimeRejectMessage(
+                sessionId: roomId,
+                reason: "User declined"
+            )
+            let encoder = JSONEncoder()
+            let jsonData = try encoder.encode(reject)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? ""
+            
+            // Get session key from Keychain
+            guard let sessionKeyData = try encryptionKeychain.getKey(for: .sessionKey, sessionId: sessionKeyId),
+                  sessionKeyData.count == EncryptionConstants.sessionKeySize else {
+                throw EncryptionError.sessionKeyNotFound
+            }
+            let sessionKey = SymmetricKey(data: sessionKeyData)
+            
+            // Increment send counter
+            let counter = state.sendCounter
+            state.sendCounter += 1
+            encryptionStates[roomId] = state
+            
+            // Encrypt the reject
+            let wireFormat = try messageEncryptor.encrypt(
+                jsonString,
+                sessionKey: sessionKey,
+                counter: counter,
+                direction: .send
+            )
+            
+            // Serialize to JSON
+            let jsonPayload = try encoder.encode(wireFormat)
+            
+            // Send encrypted binary data over DataChannel
+            _ = pcm.sendData(jsonPayload)
+            print("❌ Rejected lifetime proposal")
+        } catch {
+            print("❌ Failed to send reject: \(error)")
+        }
+    }
+    
+    /// Handle incoming lifetime proposal from peer
+    private func handleLifetimeProposal(_ proposal: LifetimeProposalMessage) {
+        guard let lifetime = MessageLifetime(rawValue: proposal.lifetime) else {
+            print("⚠️ Invalid lifetime value: \(proposal.lifetime)")
+            return
+        }
+        
+        print("📩 Received lifetime proposal: \(lifetime.displayName)")
+        
+        // Post notification to show UI
+        NotificationCenter.default.post(
+            name: .lifetimeProposalReceived,
+            object: nil,
+            userInfo: ["lifetime": lifetime, "peerName": activeSession?.displayName ?? "Peer"]
+        )
+    }
+    
+    /// Handle incoming lifetime accept from peer
+    private func handleLifetimeAccept(_ accept: LifetimeAcceptMessage) {
+        guard let lifetime = MessageLifetime(rawValue: accept.lifetime) else {
+            print("⚠️ Invalid lifetime value: \(accept.lifetime)")
+            return
+        }
+        
+        print("✅ Peer accepted lifetime: \(lifetime.displayName)")
+        
+        // Update local session to mark as agreed and apply the lifetime
+        if let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+            sessions[sessionIndex].messageLifetime = lifetime
+            sessions[sessionIndex].lifetimeAgreedAt = Date()
+            sessions[sessionIndex].lifetimeAgreedByBoth = true
+            persistSessions()
+            
+            // Clear pending proposal
+            pendingProposedLifetime = nil
+            lifetimeBeforeProposal = nil
+            agreedByBothBeforeProposal = nil
+            
+            // Add system message
+            messages.append(ChatMessage(
+                text: "Auto-delete changed to \(lifetime.displayName)",
+                timestamp: Date(),
+                isFromSelf: false,
+                isSystem: true
+            ))
+        }
+    }
+    
+    /// Handle incoming lifetime reject from peer
+    private func handleLifetimeReject(_ reject: LifetimeRejectMessage) {
+        print("❌ Peer rejected lifetime proposal: \(reject.reason ?? "No reason")")
+        
+        // Revert local session back to previous lifetime
+        if let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }),
+           let previousLifetime = lifetimeBeforeProposal {
+            
+            // Revert to the lifetime and agreed state before the proposal
+            sessions[sessionIndex].messageLifetime = previousLifetime
+            sessions[sessionIndex].lifetimeAgreedByBoth = agreedByBothBeforeProposal ?? (previousLifetime == .ephemeral)
+            persistSessions()
+            
+            print("↩️ Reverted to previous lifetime: \(previousLifetime.rawValue) (agreed: \(agreedByBothBeforeProposal ?? false))")
+            
+            // Clear pending proposal
+            pendingProposedLifetime = nil
+            lifetimeBeforeProposal = nil
+            agreedByBothBeforeProposal = nil
+            
+            // Add system message
+            messages.append(ChatMessage(
+                text: "Peer declined auto-delete change",
+                timestamp: Date(),
+                isFromSelf: false,
+                isSystem: true
+            ))
+        }
+    }
+    
+    /// Cancel/invalidate any pending lifetime proposals (called on disconnect/leave)
+    private func invalidatePendingProposals(addSystemMessage: Bool = false) {
+        // If there's a pending proposal we sent, revert to previous state
+        if pendingProposedLifetime != nil,
+           let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }),
+           let previousLifetime = lifetimeBeforeProposal {
+            
+            print("🚫 Invalidating pending proposal due to disconnect/leave")
+            
+            // Revert to the lifetime and agreed state before the proposal
+            sessions[sessionIndex].messageLifetime = previousLifetime
+            sessions[sessionIndex].lifetimeAgreedByBoth = agreedByBothBeforeProposal ?? (previousLifetime == .ephemeral)
+            persistSessions()
+            
+            print("↩️ Reverted to previous lifetime: \(previousLifetime.rawValue) (agreed: \(agreedByBothBeforeProposal ?? false))")
+            
+            if addSystemMessage {
+                messages.append(ChatMessage(
+                    text: "Auto-delete proposal cancelled",
+                    timestamp: Date(),
+                    isFromSelf: false,
+                    isSystem: true
+                ))
+            }
+        }
+        
+        // Clear pending proposal state
+        pendingProposedLifetime = nil
+        lifetimeBeforeProposal = nil
+        agreedByBothBeforeProposal = nil
+        
+        // Notify UI to close any proposal modals
+        NotificationCenter.default.post(name: .lifetimeProposalCancelled, object: nil)
     }
 
     // MARK: - ChatView Lifecycle Management
@@ -495,7 +1049,7 @@ class ChatManager: NSObject, ObservableObject {
     
     /// Reorder pinned sessions by moving a session from one position to another
     func movePinnedSession(from source: IndexSet, to destination: Int, in pinnedSessions: [ChatSession]) {
-        guard let sourceIndex = source.first else { return }
+        guard !source.isEmpty else { return }
         
         // Create mutable copy of pinned sessions
         var reordered = pinnedSessions
@@ -508,6 +1062,194 @@ class ChatManager: NSObject, ObservableObject {
             }
         }
         persistSessions()
+    }
+    
+    // MARK: - Notification Management
+    
+    /// Sync pending notifications from Notification Service Extension
+    /// This ensures notifications are tracked even when app wasn't open
+    func syncPendingNotifications() {
+        let appGroupId = "group.com.31b4.inviso"
+        let pendingNotificationsKey = "pending_notifications"
+        
+        guard let sharedDefaults = UserDefaults(suiteName: appGroupId) else {
+            print("[ChatManager] ❌ Failed to access App Group UserDefaults")
+            return
+        }
+        
+        // Load pending notifications
+        guard let pendingNotifications = sharedDefaults.array(forKey: pendingNotificationsKey) as? [[String: Any]],
+              !pendingNotifications.isEmpty else {
+            print("[ChatManager] ℹ️ No pending notifications to sync")
+            return
+        }
+        
+        print("[ChatManager] 📥 Syncing \(pendingNotifications.count) pending notifications...")
+        
+        var syncedCount = 0
+        
+        for notificationDict in pendingNotifications {
+            guard let roomId = notificationDict["roomId"] as? String,
+                  let timestamp = notificationDict["receivedAt"] as? TimeInterval else {
+                continue
+            }
+            
+            let receivedAt = Date(timeIntervalSince1970: timestamp)
+            
+            // Find the session for this roomId
+            guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+                print("[ChatManager] ⚠️ No session found for roomId: \(roomId.prefix(8))")
+                continue
+            }
+            
+            // Check if we already have this notification (avoid duplicates)
+            let alreadyExists = sessions[sessionIndex].notifications.contains { notification in
+                abs(notification.receivedAt.timeIntervalSince(receivedAt)) < 5 // Within 5 seconds
+            }
+            
+            if !alreadyExists {
+                let notification = SessionNotification(receivedAt: receivedAt)
+                sessions[sessionIndex].notifications.append(notification)
+                syncedCount += 1
+                print("[ChatManager] ✅ Synced notification for: \(sessions[sessionIndex].displayName)")
+            }
+        }
+        
+        if syncedCount > 0 {
+            persistSessions()
+            print("[ChatManager] 📥 Synced \(syncedCount) new notifications")
+        }
+        
+        // Clear pending notifications from App Group storage
+        sharedDefaults.removeObject(forKey: pendingNotificationsKey)
+        sharedDefaults.synchronize()
+        print("[ChatManager] 🗑️ Cleared pending notifications from App Group")
+    }
+    
+    /// Clear iOS notification center cards only (does not affect badge count)
+    func clearNotificationCenter() {
+        // Remove all delivered notifications from notification center
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        print("[ChatManager] � Cleared notification center cards (badge unchanged)")
+    }
+    
+    /// Reset server-side badge counts when app opens
+    private func resetServerBadgeCounts() async {
+        // Use ephemeral device ID from any active session
+        // Server will reset badges for all rooms associated with this device
+        guard let deviceId = sessions.first?.ephemeralDeviceId else {
+            print("[ChatManager] ⚠️ No active sessions to reset badges for")
+            return
+        }
+        
+        await apiClient.resetBadgeCount(deviceId: deviceId)
+    }
+    
+    /// Sync server-side badge to match local unread count
+    private func syncServerBadgeCount() async {
+        guard let session = sessions.first, let _ = session.roomId else {
+            print("[ChatManager] ⚠️ No active session to sync badge for")
+            return
+        }
+        
+        // Calculate total unread count
+        let totalUnread = sessions.reduce(0) { $0 + $1.unreadNotificationCount }
+        
+        // For now, we reset server badges when local count is 0
+        // This prevents accumulation issues
+        if totalUnread == 0 {
+            await apiClient.resetBadgeCount(deviceId: session.ephemeralDeviceId)
+            print("[ChatManager] 🔄 Reset server badge (local unread: 0)")
+        } else {
+            print("[ChatManager] 🔄 Server badge will continue from current (local unread: \(totalUnread))")
+        }
+    }
+    
+    /// Reset server-side badge for a specific room
+    private func resetServerBadgeForRoom(roomId: String, deviceId: String) async {
+        // Call API to reset badge for specific room
+        // Note: Current API resets all badges, but we can add a room-specific endpoint later
+        // For now, we just update local state and the next notification will sync properly
+        print("[ChatManager] 🔄 Would reset server badge for room: \(roomId.prefix(8))")
+    }
+    
+    /// Mark all notifications for a session as viewed
+    func markSessionNotificationsAsViewed(sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        
+        let now = Date()
+        var hasChanges = false
+        
+        for i in sessions[idx].notifications.indices {
+            if sessions[idx].notifications[i].viewedAt == nil {
+                sessions[idx].notifications[i].viewedAt = now
+                hasChanges = true
+            }
+        }
+        
+        if hasChanges {
+            print("[ChatManager] 📖 Marked \(sessions[idx].notifications.count) notifications as viewed for session: \(sessions[idx].displayName)")
+            persistSessions()
+            updateBadgeCount()
+        }
+    }
+    
+    /// Clear old notifications (older than 7 days)
+    func clearOldNotifications() {
+        let sevenDaysAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        var hasChanges = false
+        
+        for i in sessions.indices {
+            let originalCount = sessions[i].notifications.count
+            sessions[i].notifications.removeAll { $0.receivedAt < sevenDaysAgo }
+            if sessions[i].notifications.count != originalCount {
+                hasChanges = true
+            }
+        }
+        
+        if hasChanges {
+            print("[ChatManager] 🗑️ Cleared old notifications (older than 7 days)")
+            persistSessions()
+            // No need to update badge - it's cleared when app opens
+        }
+    }
+    
+    /// Update iOS badge count based on unread notifications
+    /// Update iOS badge count to match total unread notifications
+    /// Also saves current badge to App Group so Notification Service Extension can continue from there
+    /// NOTE: This is only used internally - badge is cleared when app opens
+    private func updateBadgeCount() {
+        let totalUnread = sessions.reduce(0) { $0 + $1.unreadNotificationCount }
+        
+        // Save current badge count to App Group for Notification Service Extension
+        let appGroupId = "group.com.31b4.inviso"
+        let currentBadgeKey = "current_badge_count"
+        if let sharedDefaults = UserDefaults(suiteName: appGroupId) {
+            sharedDefaults.set(totalUnread, forKey: currentBadgeKey)
+            sharedDefaults.synchronize()
+            print("[ChatManager] 💾 Saved badge count to App Group: \(totalUnread)")
+        }
+        
+        Task {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(totalUnread)
+                print("[ChatManager] 🔴 Updated badge count to: \(totalUnread)")
+            } catch {
+                print("[ChatManager] ❌ Failed to update badge count: \(error)")
+            }
+        }
+    }
+    
+    /// Clear all notifications for a specific session
+    func clearSessionNotifications(sessionId: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionId }) else { return }
+        
+        if !sessions[idx].notifications.isEmpty {
+            sessions[idx].notifications.removeAll()
+            print("[ChatManager] 🗑️ Cleared all notifications for session: \(sessions[idx].displayName)")
+            persistSessions()
+            updateBadgeCount()
+        }
     }
 
     /// Create and persist an accepted session (used for client2 joining by code, or when we already have roomId)
@@ -799,19 +1541,88 @@ class ChatManager: NSObject, ObservableObject {
             .sink { [weak self] notification in
                 Task { @MainActor in
                     guard let userInfo = notification.userInfo,
-                          let roomId = userInfo["roomId"] as? String else {
+                          let roomId = userInfo["roomId"] as? String,
+                          let receivedAt = userInfo["receivedAt"] as? Date else {
                         print("[Push] ⚠️ Invalid notification userInfo")
                         return
                     }
                     
-                    await self?.handlePushNotificationTap(roomId: roomId)
+                    await self?.handlePushNotificationTap(roomId: roomId, receivedAt: receivedAt)
+                }
+            }
+            .store(in: &appLifecycleCancellables)
+        
+        // Observe when a notification is received (to track it)
+        NotificationCenter.default.publisher(for: .pushNotificationReceived)
+            .sink { [weak self] notification in
+                Task { @MainActor in
+                    guard let userInfo = notification.userInfo,
+                          let roomId = userInfo["roomId"] as? String,
+                          let receivedAt = userInfo["receivedAt"] as? Date else {
+                        print("[Push] ⚠️ Invalid notification userInfo")
+                        return
+                    }
+                    
+                    await self?.handlePushNotificationReceived(roomId: roomId, receivedAt: receivedAt)
                 }
             }
             .store(in: &appLifecycleCancellables)
     }
     
     @MainActor
-    private func handlePushNotificationTap(roomId: String) async {
+    private func handlePushNotificationReceived(roomId: String, receivedAt: Date) async {
+        print("[Push] 📬 Tracking received notification for room: \(roomId.prefix(8))")
+        
+        // Find the session for this roomId
+        guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+            print("[Push] ⚠️ No session found for room: \(roomId.prefix(8))")
+            return
+        }
+        
+        // Add notification to the session
+        let notification = SessionNotification(receivedAt: receivedAt)
+        sessions[sessionIndex].notifications.append(notification)
+        
+        // Persist the change
+        persistSessions()
+        
+        // Update badge count
+        updateBadgeCount()
+        
+        print("[Push] ✅ Tracked notification for session: \(sessions[sessionIndex].displayName)")
+    }
+    
+    @MainActor
+    private func handlePushNotificationTap(roomId: String, receivedAt: Date) async {
+        print("[Push] 📱 Notification tapped for room: \(roomId.prefix(8)) - just opening app")
+        
+        // Find the session for this roomId
+        guard let sessionIndex = sessions.firstIndex(where: { $0.roomId == roomId }) else {
+            print("[Push] ⚠️ No session found for room: \(roomId.prefix(8))")
+            return
+        }
+        
+        let session = sessions[sessionIndex]
+        
+        // Add this notification to history if not already tracked
+        let alreadyTracked = session.notifications.contains { notification in
+            // Check if we already have a notification within 5 seconds of this one
+            abs(notification.receivedAt.timeIntervalSince(receivedAt)) < 5
+        }
+        
+        if !alreadyTracked {
+            let notification = SessionNotification(receivedAt: receivedAt)
+            sessions[sessionIndex].notifications.append(notification)
+            persistSessions()
+        }
+        
+        // NO NAVIGATION - just open the app normally
+        // User can manually navigate to SessionsView to see which session has notifications
+        print("[Push] ✅ Notification tracked, app opened without auto-navigation")
+    }
+    
+    @MainActor
+    private func handlePushNotificationTap_OLD(roomId: String) async {
         print("[Push] 📱 Handling notification tap for room: \(roomId.prefix(8))")
         
         // If we're already in this room, just bring the app to foreground
@@ -868,6 +1679,15 @@ class ChatManager: NSObject, ObservableObject {
         print("📱 App became active")
         print("🔍 State check: roomId=\(roomId.isEmpty ? "empty" : String(roomId.prefix(8))), isP2PConnected=\(isP2PConnected), hadP2POnce=\(hadP2POnce)")
         print("🔍 wasInRoomBeforeDisconnect=\(wasInRoomBeforeDisconnect ?? "nil")")
+        
+        // Sync pending notifications from Notification Service Extension
+        syncPendingNotifications()
+        
+        // Update badge count based on total unread notifications
+        updateBadgeCount()
+        
+        // Clear notification center cards (but keep badge showing unread count)
+        clearNotificationCenter()
         
         // Check if we're in a room but P2P is not connected, and we had P2P before
         // This covers the case where connection dropped while phone was locked/backgrounded
@@ -1339,6 +2159,10 @@ class ChatManager: NSObject, ObservableObject {
             isEncryptionReady = false
             keyExchangeInProgress = false
             
+            // Invalidate any pending lifetime proposals (both sent and received)
+            // This will also notify UI to close any incoming proposal modals
+            invalidatePendingProposals(addSystemMessage: false)
+            
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
         case "left_room":
             self.isAwaitingLeaveAck = false
@@ -1397,6 +2221,9 @@ extension ChatManager: PeerConnectionManagerDelegate {
             print("🔒 P2P connection lost - wiping encryption keys")
             cleanupEncryption()
             connectionPath = .unknown
+            
+            // Invalidate any pending lifetime proposals
+            invalidatePendingProposals(addSystemMessage: false)
             
             // Save room for auto-rejoin when app returns to foreground
             if !roomId.isEmpty {
@@ -1471,8 +2298,97 @@ extension ChatManager: PeerConnectionManagerDelegate {
             state.receiveCounter = max(state.receiveCounter, wireFormat.c + 1)
             encryptionStates[roomId] = state
             
-            // Display decrypted message
-            messages.append(ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false))
+            // Check message type (location, voice, lifetime proposal, or text)
+            if let locationData = LocationData.fromJSONString(plaintext) {
+                // Display as location message
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
+                msg.locationData = locationData
+                messages.append(msg)
+                print("📍 Received location: \(locationData.latitude), \(locationData.longitude)")
+                // Note: Location messages not saved to storage yet
+            } else if let voiceData = VoiceData.fromJSONString(plaintext) {
+                // Display as voice message
+                var msg = ChatMessage(text: "", timestamp: Date(), isFromSelf: false)
+                msg.voiceData = voiceData
+                messages.append(msg)
+                print("🎤 Received voice message: \(voiceData.duration)s")
+                // Note: Voice messages not saved to storage yet
+            } else if let jsonData = plaintext.data(using: .utf8) {
+                // Try to decode lifetime messages
+                if let proposal = try? decoder.decode(LifetimeProposalMessage.self, from: jsonData) {
+                    handleLifetimeProposal(proposal)
+                } else if let accept = try? decoder.decode(LifetimeAcceptMessage.self, from: jsonData) {
+                    handleLifetimeAccept(accept)
+                } else if let reject = try? decoder.decode(LifetimeRejectMessage.self, from: jsonData) {
+                    handleLifetimeReject(reject)
+                } else {
+                    // Display as text message
+                    var message = ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false)
+                    
+                    // Always set lifetime metadata from session (for UI display)
+                    if let session = activeSession {
+                        message.lifetime = session.messageLifetime
+                        if let seconds = session.messageLifetime.seconds {
+                            message.expiresAt = Date().addingTimeInterval(seconds)
+                        }
+                        
+                        // Save message if storage is unlocked and session has non-ephemeral lifetime
+                        if session.messageLifetime != .ephemeral && storage.isUnlocked {
+                            do {
+                                // Create storage config
+                                let config = MessageStorageConfig(
+                                    sessionId: session.id,
+                                    lifetime: session.messageLifetime,
+                                    agreedAt: session.lifetimeAgreedAt ?? Date(),
+                                    agreedByBoth: session.lifetimeAgreedByBoth
+                                )
+                                
+                                try storage.saveMessage(message, sessionId: session.id, config: config)
+                                message.savedLocally = true
+                                
+                                print("💾 Saved received message to storage")
+                            } catch {
+                                print("⚠️ Failed to save received message: \(error)")
+                            }
+                        }
+                    }
+                    
+                    messages.append(message)
+                }
+            } else {
+                // Display as text message
+                var message = ChatMessage(text: plaintext, timestamp: Date(), isFromSelf: false)
+                
+                // Always set lifetime metadata from session (for UI display)
+                if let session = activeSession {
+                    message.lifetime = session.messageLifetime
+                    if let seconds = session.messageLifetime.seconds {
+                        message.expiresAt = Date().addingTimeInterval(seconds)
+                    }
+                    
+                    // Save message if storage is unlocked and session has non-ephemeral lifetime
+                    if session.messageLifetime != .ephemeral && storage.isUnlocked {
+                        do {
+                            // Create storage config
+                            let config = MessageStorageConfig(
+                                sessionId: session.id,
+                                lifetime: session.messageLifetime,
+                                agreedAt: session.lifetimeAgreedAt ?? Date(),
+                                agreedByBoth: session.lifetimeAgreedByBoth
+                            )
+                            
+                            try storage.saveMessage(message, sessionId: session.id, config: config)
+                            message.savedLocally = true
+                            
+                            print("💾 Saved received message to storage")
+                        } catch {
+                            print("⚠️ Failed to save received message: \(error)")
+                        }
+                    }
+                }
+                
+                messages.append(message)
+            }
             
             // Update activity for active session
             if let sessionId = activeSessionId {

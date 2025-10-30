@@ -19,6 +19,51 @@ struct ChatMessage: Identifiable, Equatable {
     let timestamp: Date
     let isFromSelf: Bool
     var isSystem: Bool = false
+    var locationData: LocationData? = nil // Optional location data for location messages
+    var voiceData: VoiceData? = nil // Optional voice data for voice messages
+    
+    // Message auto-delete metadata
+    var savedLocally: Bool = false // Whether this message is stored on disk
+    var expiresAt: Date? = nil // When this message will be auto-deleted
+    var lifetime: MessageLifetime? = nil // Auto-delete policy for this message
+    
+    var isLocationMessage: Bool {
+        locationData != nil
+    }
+    
+    var isVoiceMessage: Bool {
+        voiceData != nil
+    }
+    
+    /// Check if message has expired
+    var isExpired: Bool {
+        guard let expiresAt = expiresAt else { return false }
+        return Date() >= expiresAt
+    }
+    
+    /// Time remaining until expiration (for UI display)
+    var timeUntilExpiration: TimeInterval? {
+        guard let expiresAt = expiresAt else { return nil }
+        return expiresAt.timeIntervalSinceNow
+    }
+}
+
+// MARK: - Push Notification Tracking
+
+struct SessionNotification: Identifiable, Codable, Equatable {
+    let id: UUID
+    let receivedAt: Date
+    var viewedAt: Date?
+    
+    init(id: UUID = UUID(), receivedAt: Date = Date(), viewedAt: Date? = nil) {
+        self.id = id
+        self.receivedAt = receivedAt
+        self.viewedAt = viewedAt
+    }
+    
+    var isUnread: Bool {
+        viewedAt == nil
+    }
 }
 
 // MARK: - Sessions (frontend-only for now)
@@ -54,6 +99,24 @@ struct ChatSession: Identifiable, Equatable, Codable {
     // Pin feature
     var isPinned: Bool = false
     var pinnedOrder: Int? // Lower numbers appear first, nil if not pinned
+    
+    // Notification tracking
+    var notifications: [SessionNotification] = []
+    
+    // Message auto-delete settings (agreed between both peers)
+    var messageLifetime: MessageLifetime = .ephemeral // Default: RAM only
+    var lifetimeAgreedAt: Date? // When both peers agreed on current setting
+    var lifetimeAgreedByBoth: Bool = false // True when both confirmed
+    
+    // Computed property for unread notification count
+    var unreadNotificationCount: Int {
+        notifications.filter { $0.isUnread }.count
+    }
+    
+    // Computed property for last notification time
+    var lastNotificationTime: Date? {
+        notifications.last?.receivedAt
+    }
 
     init(id: UUID = UUID(), name: String? = nil, code: String, roomId: String? = nil, createdAt: Date = Date(), expiresAt: Date? = nil, lastActivityDate: Date = Date(), firstConnectedAt: Date? = nil, closedAt: Date? = nil, status: SessionStatus = .pending, isCreatedByMe: Bool = true, ephemeralDeviceId: String = UUID().uuidString, encryptionEnabled: Bool = true, keyExchangeCompletedAt: Date? = nil, wasOriginalInitiator: Bool? = nil, isPinned: Bool = false, pinnedOrder: Int? = nil) {
         self.id = id
@@ -77,7 +140,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
     
     // Custom Codable for backward compatibility
     enum CodingKeys: String, CodingKey {
-        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder
+        case id, name, code, roomId, createdAt, expiresAt, lastActivityDate, firstConnectedAt, closedAt, status, isCreatedByMe, ephemeralDeviceId, encryptionEnabled, keyExchangeCompletedAt, wasOriginalInitiator, isPinned, pinnedOrder, notifications, messageLifetime, lifetimeAgreedAt, lifetimeAgreedByBoth
     }
     
     init(from decoder: Decoder) throws {
@@ -103,6 +166,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
         // Pin feature (default to false/nil for backward compatibility)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
+        // Notification tracking (default to empty array for backward compatibility)
+        notifications = try container.decodeIfPresent([SessionNotification].self, forKey: .notifications) ?? []
+        // Message auto-delete (default to ephemeral for backward compatibility)
+        messageLifetime = try container.decodeIfPresent(MessageLifetime.self, forKey: .messageLifetime) ?? .ephemeral
+        lifetimeAgreedAt = try container.decodeIfPresent(Date.self, forKey: .lifetimeAgreedAt)
+        lifetimeAgreedByBoth = try container.decodeIfPresent(Bool.self, forKey: .lifetimeAgreedByBoth) ?? false
     }
 
     var displayName: String {

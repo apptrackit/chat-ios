@@ -15,6 +15,7 @@ struct RoomSettingsView: View {
     
     @State private var roomName: String = ""
     @State private var showDeleteConfirm = false
+    @State private var showLifetimeSettings = false
     @FocusState private var isNameFieldFocused: Bool
     
     var body: some View {
@@ -25,6 +26,11 @@ struct RoomSettingsView: View {
                 
                 // Room Name Section
                 nameSection
+                
+                // Message Auto-Delete Section (only when connected)
+                if chat.isP2PConnected {
+                    autoDeleteSection
+                }
                 
                 // Info Section
                 infoSection
@@ -257,6 +263,59 @@ struct RoomSettingsView: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
             )
+        }
+    }
+    
+    private var autoDeleteSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Message Auto-Delete")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+            
+            Button {
+                showLifetimeSettings = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: session.messageLifetime.icon)
+                        .font(.body)
+                        .foregroundColor(session.lifetimeAgreedByBoth ? .green : .orange)
+                        .frame(width: 24)
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session.messageLifetime.displayName)
+                            .font(.body)
+                            .foregroundColor(.primary)
+                        
+                        Text(session.lifetimeAgreedByBoth ? "Both peers agreed" : "Waiting for peer confirmation")
+                            .font(.caption)
+                            .foregroundColor(session.lifetimeAgreedByBoth ? .green : .orange)
+                    }
+                    
+                    Spacer()
+                    
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+                .background(Color(UIColor.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            
+            Text("Configure how long messages are saved on both devices")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 4)
+        }
+        .sheet(isPresented: $showLifetimeSettings) {
+            MessageLifetimeSettingsView(chatManager: chat)
+                .presentationDetents([.height(260)])
         }
     }
     

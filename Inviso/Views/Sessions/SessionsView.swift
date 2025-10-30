@@ -83,6 +83,14 @@ struct SessionsView: View {
                     chat.shouldNavigateToChat = false
                 }
             }
+            .onChange(of: chat.shouldNavigateToSessions) { oldValue, newValue in
+                if newValue {
+                    print("[SessionsView] 📋 Push notification triggered - staying on sessions view")
+                    // We're already on sessions view, just reset the flag
+                    // The activeSessionId is already set, so the session will be highlighted
+                    chat.shouldNavigateToSessions = false
+                }
+            }
             .onReceive(ticker) { _ in
                 if isVisible && scenePhase == .active { chat.pollPendingAndValidateRooms() }
             }
@@ -434,6 +442,11 @@ struct SessionsView: View {
                 // Show the pending room modal with code
                 showPendingRoomModal = session
             } else if let rid = session.roomId {
+                // Mark notifications as viewed when joining
+                if session.unreadNotificationCount > 0 {
+                    chat.markSessionNotificationsAsViewed(sessionId: session.id)
+                }
+                
                 // Accepted session - join room and go to chat
                 chat.joinRoom(roomId: rid)
                 goToChat = true
@@ -448,6 +461,7 @@ struct SessionsView: View {
         .buttonStyle(.plain)
         .disabled(chat.connectionStatus != .connected && session.status != .pending)
         .swipeActions(edge: .leading) {
+            // Pin/Unpin action
             Button {
                 if session.isPinned {
                     chat.unpinSession(session)
@@ -462,6 +476,16 @@ struct SessionsView: View {
                 }
             }
             .tint(session.isPinned ? .orange : .accentColor)
+            
+            // Mark as Seen (only show if there are unread notifications)
+            if session.unreadNotificationCount > 0 {
+                Button {
+                    chat.markSessionNotificationsAsViewed(sessionId: session.id)
+                } label: {
+                    Image(systemName: "checkmark.circle")
+                }
+                .tint(.green)
+            }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
@@ -471,17 +495,37 @@ struct SessionsView: View {
             }
         }
         .contextMenu {
+            // Rename option
+            Button {
+                renamingSession = session
+                renameText = session.name ?? ""
+            } label: {
+                Label("Rename", systemImage: "pencil")
+            }
+            
+            // Pin/Unpin option
             Button {
                 if session.isPinned {
                     chat.unpinSession(session)
                 } else {
                     chat.pinSession(session)
                 }
-            } label: { 
-                Label(
-                    session.isPinned ? "Unpin" : "Pin",
-                    systemImage: session.isPinned ? "pin.slash" : "pin"
-                )
+            } label: {
+                if session.isPinned {
+                    Label("Unpin", systemImage: "pin.slash")
+                } else {
+                    Label("Pin", systemImage: "pin")
+                }
+            }
+            
+            Divider()
+            
+            if session.unreadNotificationCount > 0 {
+                Button {
+                    chat.markSessionNotificationsAsViewed(sessionId: session.id)
+                } label: {
+                    Label("Mark as Seen", systemImage: "checkmark.circle")
+                }
             }
             
             Button {
@@ -489,6 +533,8 @@ struct SessionsView: View {
             } label: { 
                 Label("Settings", systemImage: "gearshape")
             }
+            
+            Divider()
             
             Button(role: .destructive) {
                 sessionToDelete = session
@@ -583,8 +629,30 @@ struct SessionsView: View {
                             .font(.caption2)
                             .foregroundColor(.accentColor)
                     }
+                    // Notification badge
+                    if session.unreadNotificationCount > 0 {
+                        Text("\(session.unreadNotificationCount)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.red))
+                    }
                 }
                 subtitleView(for: session)
+                
+                // Show last notification time if there are unread notifications
+                if session.unreadNotificationCount > 0, let lastNotificationTime = session.lastNotificationTime {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bell.fill")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                        Text("Last ping: \(formatRelativeDate(lastNotificationTime))")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                    .padding(.top, 2)
+                }
             }
             
             Spacer()

@@ -5,40 +5,85 @@ struct SettingsView: View {
     @EnvironmentObject private var chat: ChatManager
     @State private var showEraseConfirm: Bool = false
     @State private var isErasing: Bool = false
+    @State private var eraseConfirmText: String = ""
     @ObservedObject private var serverConfig = ServerConfig.shared
     @State private var editServerHost: String = ServerConfig.shared.host
     @State private var showServerChangeAlert = false
+    @State private var serverCheckStatus: ServerCheckStatus = .idle
+    @State private var serverCheckTask: Task<Void, Never>?
     @ObservedObject private var authStore = AuthenticationSettingsStore.shared
     @State private var requireBiometric = AuthenticationSettingsStore.shared.settings.mode.requiresBiometrics
-    @State private var requirePassphrase = AuthenticationSettingsStore.shared.settings.mode.requiresPassphrase
+    @State private var requirePasscode = AuthenticationSettingsStore.shared.settings.mode.requiresPassphrase
     @State private var hasPassphrase = PassphraseManager.shared.hasPassphrase
     @State private var biometricCapability = BiometricAuth.shared.capability()
-    @State private var pendingPassphraseIntent: PassphraseIntent?
-    @State private var passphraseErrorMessage: String?
+    @State private var pendingPasscodeIntent: PasscodeIntent?
+    @State private var passcodeErrorMessage: String?
     @State private var isApplyingAuthChange = false
-    @State private var showRemovePassphraseConfirm = false
-    @State private var activePassphraseModal: PassphraseModal?
+    @State private var showRemovePasscodeConfirm = false
+    @State private var activePasscodeModal: PasscodeModal?
     @State private var showReauthModal = false
     @State private var pendingSensitiveAction: SensitiveSecurityAction?
     @State private var reauthMode: AuthenticationSettings.Mode = .disabled
     @State private var reauthErrorMessage: String?
     @State private var isReauthBiometricInFlight = false
+    
+    enum ServerCheckStatus {
+        case idle
+        case checking
+        case online
+        case offline
+        case invalid
+        
+        var icon: String {
+            switch self {
+            case .idle: return "circle"
+            case .checking: return "circle.dotted"
+            case .online: return "checkmark.circle.fill"
+            case .offline: return "exclamationmark.circle.fill"
+            case .invalid: return "xmark.circle.fill"
+            }
+        }
+        
+        var color: Color {
+            switch self {
+            case .idle: return .secondary
+            case .checking: return .blue
+            case .online: return .green
+            case .offline: return .orange
+            case .invalid: return .red
+            }
+        }
+        
+        var text: String {
+            switch self {
+            case .idle: return "Not checked"
+            case .checking: return "Checking..."
+            case .online: return "Server online"
+            case .offline: return "Server offline"
+            case .invalid: return "Invalid address"
+            }
+        }
+    }
 
     var body: some View {
         Form {
-            Section(header: Text("Privacy")) {
+            Section(header: Label("Privacy", systemImage: "lock.shield.fill")) {
                 NavigationLink {
-                    EphemeralIDsView()
+                    ManageContactsView()
+                        .environmentObject(chat)
                 } label: {
                     HStack {
+                        Image(systemName: "person.2.fill")
+                            .foregroundColor(.blue)
+                            .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Session Identities")
-                            Text("Each session uses a unique, ephemeral ID")
+                            Text("Manage Contacts")
+                            Text("View all sessions and encrypted chat details")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        let count = DeviceIDManager.shared.getEphemeralIDs().count
+                        let count = chat.sessions.count
                         if count > 0 {
                             Text("\(count)")
                                 .font(.caption.weight(.semibold))
@@ -52,12 +97,15 @@ struct SettingsView: View {
                 }
                 
                 NavigationLink {
-                    NotificationSettingsView()
+                    PermissionsView()
                 } label: {
                     HStack {
+                        Image(systemName: "checkmark.shield.fill")
+                            .foregroundColor(.green)
+                            .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Push Notifications")
-                            Text("Get notified when someone joins your room")
+                            Text("Permissions")
+                            Text("Manage app permissions")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -67,7 +115,7 @@ struct SettingsView: View {
 
             securitySection
 
-            Section(header: Text("About")) {
+            Section(header: Label("About", systemImage: "info.circle.fill")) {
                 HStack {
                     Text("Server")
                     Spacer()
@@ -104,65 +152,61 @@ struct SettingsView: View {
                 }
             }
 
-            Section(header: Text("Danger Zone")) {
+            Section(header: Label("Danger Zone", systemImage: "exclamationmark.triangle.fill")) {
                 Button(role: .destructive) {
+                    eraseConfirmText = ""
                     showEraseConfirm = true
                 } label: {
                     HStack {
-                        Image(systemName: "trash")
+                        Image(systemName: "trash.fill")
                         Text("Erase All Data")
                         if isErasing { Spacer(); ProgressView() }
                     }
                 }
                 .disabled(isErasing)
-                .help("Removes local data and cache, purges server data for this device, and resets the device ID.")
             }
         }
         .navigationTitle("Settings")
-        .alert("Change Server", isPresented: $showServerChangeAlert) {
-            TextField("Host", text: $editServerHost)
-            Button("Cancel", role: .cancel) {}
-            Button("Save") {
-                let newHost = editServerHost
-                chat.changeServerHost(to: newHost)
-            }
-        } message: {
-            Text("Enter server host (e.g. chat.example.com). Current: \(serverConfig.host)")
-        }
-        .alert("Erase All Data?", isPresented: $showEraseConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Erase", role: .destructive) {
-                isErasing = true
-                Task {
-                    // CRITICAL: Purge server FIRST (before clearing ephemeral IDs)
-                    await eraseAll()
-                    // Then clear in-memory and persisted UI state
-                    await MainActor.run {
-                        chat.eraseLocalState()
-                        isErasing = false
-                    }
+        .sheet(isPresented: $showServerChangeAlert) {
+            ServerChangeView(
+                editServerHost: $editServerHost,
+                serverCheckStatus: $serverCheckStatus,
+                serverCheckTask: $serverCheckTask,
+                onSave: {
+                    chat.changeServerHost(to: editServerHost)
+                    showServerChangeAlert = false
                 }
+            )
+        }
+        .alert("Erase All Data", isPresented: $showEraseConfirm) {
+            TextField("Type CONFIRM to erase", text: $eraseConfirmText)
+            Button("Cancel", role: .cancel) {
+                eraseConfirmText = ""
             }
+            Button("Erase Everything", role: .destructive) {
+                performCompleteErase()
+            }
+            .disabled(eraseConfirmText != "CONFIRM")
         } message: {
-            Text("This removes all local data and cache, requests server-side purge for all your sessions, and clears all ephemeral IDs. This cannot be undone.")
+            Text("This will completely reset the app: remove all data, cache, passcode, Face ID, permissions, and close the app. You'll see onboarding again on next launch.\n\nType CONFIRM to proceed.")
         }
         .onAppear {
             syncAuthState()
             biometricCapability = BiometricAuth.shared.capability()
         }
         .onReceive(authStore.$settings) { _ in syncAuthState() }
-        .alert("Authentication Error", isPresented: Binding(get: { passphraseErrorMessage != nil }, set: { if !$0 { passphraseErrorMessage = nil } })) {
+        .alert("Authentication Error", isPresented: Binding(get: { passcodeErrorMessage != nil }, set: { if !$0 { passcodeErrorMessage = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(passphraseErrorMessage ?? "")
+            Text(passcodeErrorMessage ?? "")
         }
-        .alert("Remove Passphrase?", isPresented: $showRemovePassphraseConfirm) {
+        .alert("Remove Passcode?", isPresented: $showRemovePasscodeConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
-                requestReauthentication(for: .removePassphrase)
+                requestReauthentication(for: .removePasscode)
             }
         } message: {
-            Text("This deletes the stored passphrase and disables passphrase authentication.")
+            Text("This deletes the stored passcode and disables passcode authentication.")
         }
         .overlay { securityOverlay }
     }
@@ -175,74 +219,74 @@ struct SettingsView: View {
 
 // MARK: - Erase helpers
 extension SettingsView {
-    private enum PassphraseIntent {
+    fileprivate enum PasscodeIntent {
         case enable
         case change
     }
 
-    private enum PassphraseModal {
+    fileprivate enum PasscodeModal {
         case create
         case change
 
         var title: String {
             switch self {
-            case .create: return "Set Passphrase"
-            case .change: return "Change Passphrase"
+            case .create: return "Set Passcode"
+            case .change: return "Change Passcode"
             }
         }
 
         var instruction: String {
             switch self {
-            case .create: return "Choose a passphrase of at least eight characters."
-            case .change: return "Enter your new passphrase."
+            case .create: return "Choose a numeric passcode (4-10 digits)."
+            case .change: return "Enter your new numeric passcode (4-10 digits)."
             }
         }
     }
 
-    private enum SensitiveSecurityAction {
-        case disablePassphrase
+    fileprivate enum SensitiveSecurityAction {
+        case disablePasscode
         case disableBiometric
-        case changePassphrase
-        case removePassphrase
+        case changePasscode
+        case removePasscode
 
         var title: String {
             switch self {
-            case .disablePassphrase: return "Disable Passphrase"
+            case .disablePasscode: return "Disable Passcode"
             case .disableBiometric: return "Disable Biometrics"
-            case .changePassphrase: return "Change Passphrase"
-            case .removePassphrase: return "Remove Passphrase"
+            case .changePasscode: return "Change Passcode"
+            case .removePasscode: return "Remove Passcode"
             }
         }
 
         var message: String {
             switch self {
-            case .disablePassphrase:
-                return "Authenticate to disable passphrase protection."
+            case .disablePasscode:
+                return "Authenticate to disable passcode protection."
             case .disableBiometric:
                 return "Authenticate to disable biometric unlock."
-            case .changePassphrase:
-                return "Authenticate before changing your passphrase."
-            case .removePassphrase:
-                return "Authenticate to remove the stored passphrase."
+            case .changePasscode:
+                return "Authenticate before changing your passcode."
+            case .removePasscode:
+                return "Authenticate to remove the stored passcode."
             }
         }
 
         var biometricReason: String {
             switch self {
-            case .disablePassphrase:
-                return "Confirm to disable passphrase authentication"
+            case .disablePasscode:
+                return "Confirm to disable passcode authentication"
             case .disableBiometric:
                 return "Confirm to disable biometric authentication"
-            case .changePassphrase:
-                return "Confirm to change your passphrase"
-            case .removePassphrase:
-                return "Confirm to remove the passphrase"
+            case .changePasscode:
+                return "Confirm to change your passcode"
+            case .removePasscode:
+                return "Confirm to remove the passcode"
             }
         }
     }
 
-    private var passphraseManager: PassphraseManager { .shared }
-    private var hasActiveOverlay: Bool { activePassphraseModal != nil || showReauthModal }
+    private var passcodeManager: PassphraseManager { .shared }
+    private var hasActiveOverlay: Bool { activePasscodeModal != nil || showReauthModal }
 
     @ViewBuilder
     private var securitySection: some View {
@@ -257,33 +301,33 @@ extension SettingsView {
                     .foregroundColor(.secondary)
             }
 
-            Toggle(isOn: Binding(get: { requirePassphrase }, set: { updatePassphraseToggle($0) })) {
-                Label("Require Passphrase", systemImage: "key.fill")
+            Toggle(isOn: Binding(get: { requirePasscode }, set: { updatePasscodeToggle($0) })) {
+                Label("Require Passcode", systemImage: "key.fill")
             }
             .disabled(hasActiveOverlay)
 
-            Button(hasPassphrase ? "Change Passphrase" : "Set Passphrase") {
+            Button(hasPassphrase ? "Change Passcode" : "Set Passcode") {
                 guard !hasActiveOverlay else { return }
                 if hasPassphrase {
-                    pendingPassphraseIntent = .change
-                    requestReauthentication(for: .changePassphrase)
+                    pendingPasscodeIntent = .change
+                    requestReauthentication(for: .changePasscode)
                 } else {
-                    pendingPassphraseIntent = .enable
-                    activePassphraseModal = .create
+                    pendingPasscodeIntent = .enable
+                    activePasscodeModal = .create
                 }
             }
             .buttonStyle(.borderless)
             .disabled(hasActiveOverlay)
 
             if hasPassphrase {
-                Button("Remove Passphrase", role: .destructive) {
-                    showRemovePassphraseConfirm = true
+                Button("Remove Passcode", role: .destructive) {
+                    showRemovePasscodeConfirm = true
                 }
                 .buttonStyle(.borderless)
                 .disabled(hasActiveOverlay)
             }
 
-            Label(hasPassphrase ? "Passphrase configured" : "No passphrase set", systemImage: hasPassphrase ? "checkmark.seal.fill" : "exclamationmark.triangle")
+            Label(hasPassphrase ? "Passcode configured" : "No passcode set", systemImage: hasPassphrase ? "checkmark.seal.fill" : "exclamationmark.triangle")
                 .foregroundColor(hasPassphrase ? .secondary : .orange)
                 .font(.footnote)
 
@@ -297,8 +341,8 @@ extension SettingsView {
         isApplyingAuthChange = true
         let mode = authStore.settings.mode
         requireBiometric = mode.requiresBiometrics
-        requirePassphrase = mode.requiresPassphrase
-        hasPassphrase = passphraseManager.hasPassphrase
+        requirePasscode = mode.requiresPassphrase
+        hasPassphrase = passcodeManager.hasPassphrase
         isApplyingAuthChange = false
     }
 
@@ -306,11 +350,11 @@ extension SettingsView {
         guard !isApplyingAuthChange else { return }
         if newValue && biometricCapability == .none {
             requireBiometric = false
-            passphraseErrorMessage = "This device doesn't support biometrics."
+            passcodeErrorMessage = "This device doesn't support biometrics."
             return
         }
         if newValue {
-            applyAuthenticationMode(biometric: true, passphrase: requirePassphrase)
+            applyAuthenticationMode(biometric: true, passcode: requirePasscode)
             requireBiometric = true
         } else {
             requireBiometric = true
@@ -318,38 +362,38 @@ extension SettingsView {
         }
     }
 
-    private func updatePassphraseToggle(_ newValue: Bool) {
+    private func updatePasscodeToggle(_ newValue: Bool) {
         guard !isApplyingAuthChange else { return }
         if newValue {
             guard hasPassphrase else {
-                pendingPassphraseIntent = .enable
-                activePassphraseModal = .create
-                DispatchQueue.main.async { requirePassphrase = false }
+                pendingPasscodeIntent = .enable
+                activePasscodeModal = .create
+                DispatchQueue.main.async { requirePasscode = false }
                 return
             }
-            requirePassphrase = true
-            applyAuthenticationMode(biometric: requireBiometric, passphrase: true)
+            requirePasscode = true
+            applyAuthenticationMode(biometric: requireBiometric, passcode: true)
         } else {
-            requirePassphrase = true
-            requestReauthentication(for: .disablePassphrase)
+            requirePasscode = true
+            requestReauthentication(for: .disablePasscode)
             return
         }
     }
 
-    private func performPassphraseRemoval() {
-        passphraseManager.clear()
-        passphraseErrorMessage = nil
-        hasPassphrase = passphraseManager.hasPassphrase
-        if requirePassphrase {
-            requirePassphrase = false
+    private func performPasscodeRemoval() {
+        passcodeManager.clear()
+        passcodeErrorMessage = nil
+        hasPassphrase = passcodeManager.hasPassphrase
+        if requirePasscode {
+            requirePasscode = false
         }
-        applyAuthenticationMode(biometric: requireBiometric, passphrase: false)
+        applyAuthenticationMode(biometric: requireBiometric, passcode: false)
         syncAuthState()
     }
 
     private func requestReauthentication(for action: SensitiveSecurityAction) {
         guard !hasActiveOverlay else { return }
-        showRemovePassphraseConfirm = false
+        showRemovePasscodeConfirm = false
         pendingSensitiveAction = action
         reauthMode = authStore.settings.mode
         reauthErrorMessage = nil
@@ -366,13 +410,13 @@ extension SettingsView {
 
         guard let action = pendingSensitiveAction else { return }
         switch action {
-        case .disablePassphrase:
-            requirePassphrase = true
+        case .disablePasscode:
+            requirePasscode = true
         case .disableBiometric:
             requireBiometric = true
-        case .changePassphrase:
-            pendingPassphraseIntent = nil
-        case .removePassphrase:
+        case .changePasscode:
+            pendingPasscodeIntent = nil
+        case .removePasscode:
             break
         }
     }
@@ -386,17 +430,17 @@ extension SettingsView {
         pendingSensitiveAction = nil
 
         switch action {
-        case .disablePassphrase:
-            requirePassphrase = false
-            applyAuthenticationMode(biometric: requireBiometric, passphrase: false)
+        case .disablePasscode:
+            requirePasscode = false
+            applyAuthenticationMode(biometric: requireBiometric, passcode: false)
         case .disableBiometric:
             requireBiometric = false
-            applyAuthenticationMode(biometric: false, passphrase: requirePassphrase)
-        case .changePassphrase:
-            pendingPassphraseIntent = .change
-            activePassphraseModal = .change
-        case .removePassphrase:
-            performPassphraseRemoval()
+            applyAuthenticationMode(biometric: false, passcode: requirePasscode)
+        case .changePasscode:
+            pendingPasscodeIntent = .change
+            activePasscodeModal = .change
+        case .removePasscode:
+            performPasscodeRemoval()
         }
         syncAuthState()
     }
@@ -420,10 +464,10 @@ extension SettingsView {
                 case .cancelled:
                     self.reauthErrorMessage = "Authentication was cancelled."
                 case .fallback:
-                    self.reauthErrorMessage = "Authentication fallback selected. Enter passphrase to continue."
+                    self.reauthErrorMessage = "Authentication fallback selected. Enter passcode to continue."
                 case .failed(let code):
                     if code == .biometryLockout {
-                        self.reauthErrorMessage = "Biometrics are locked. Enter your passphrase instead."
+                        self.reauthErrorMessage = "Biometrics are locked. Enter your passcode instead."
                     } else {
                         self.reauthErrorMessage = "Authentication failed. Try again."
                     }
@@ -433,33 +477,33 @@ extension SettingsView {
     }
 
     @MainActor
-    private func validateReauthPassphrase(_ value: String) {
+    private func validateReauthPasscode(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else {
-            reauthErrorMessage = "Passphrase cannot be empty."
+            reauthErrorMessage = "Passcode cannot be empty."
             return
         }
-        if passphraseManager.validate(passphrase: trimmed) {
+        if passcodeManager.validate(passphrase: trimmed) {
             completeReauthentication()
         } else {
-            reauthErrorMessage = "Incorrect passphrase."
+            reauthErrorMessage = "Incorrect passcode."
         }
     }
-
+}
 
 // MARK: - Modal Views
-private struct PassphraseModalView: View {
-    let mode: SettingsView.PassphraseModal
+private struct PasscodeModalView: View {
+    let mode: SettingsView.PasscodeModal
     let onComplete: (String) -> Void
     let onCancel: () -> Void
 
-    @State private var passphrase = ""
+    @State private var passcode = ""
     @State private var confirmation = ""
     @State private var errorMessage: String?
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
-        case passphrase
+        case passcode
         case confirmation
     }
 
@@ -479,21 +523,37 @@ private struct PassphraseModalView: View {
                 }
 
                 VStack(spacing: 12) {
-                    SecureField("New passphrase", text: $passphrase)
-                        .focused($focusedField, equals: .passphrase)
+                    SecureField("New passcode", text: $passcode)
+                        .focused($focusedField, equals: .passcode)
                         .textContentType(.newPassword)
+                        .keyboardType(.numberPad)
                         .submitLabel(.next)
                         .onSubmit { focusedField = .confirmation }
+                        .onChange(of: passcode) { oldValue, newValue in
+                            // Filter to numbers only and limit to 10 digits
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue || filtered.count > 10 {
+                                passcode = String(filtered.prefix(10))
+                            }
+                        }
 
-                    SecureField("Confirm passphrase", text: $confirmation)
+                    SecureField("Confirm passcode", text: $confirmation)
                         .focused($focusedField, equals: .confirmation)
                         .textContentType(.newPassword)
+                        .keyboardType(.numberPad)
                         .submitLabel(.done)
                         .onSubmit { attemptSave() }
+                        .onChange(of: confirmation) { oldValue, newValue in
+                            // Filter to numbers only and limit to 10 digits
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue || filtered.count > 10 {
+                                confirmation = String(filtered.prefix(10))
+                            }
+                        }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Avoid using easily guessable information.")
+                    Text("Use only numbers (0-9).")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                     if let error = errorMessage {
@@ -522,24 +582,30 @@ private struct PassphraseModalView: View {
             .shadow(radius: 18)
             .padding(.horizontal, 32)
         }
-        .onAppear { focusedField = .passphrase }
+        .onAppear { focusedField = .passcode }
     }
 
     private var isValid: Bool {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
         let confirmationTrimmed = confirmation.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count >= 8 && trimmed == confirmationTrimmed
+        let isNumeric = trimmed.allSatisfy { $0.isNumber }
+        return trimmed.count >= 4 && trimmed.count <= 10 && isNumeric && trimmed == confirmationTrimmed
     }
 
     private func attemptSave() {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
         let confirmationTrimmed = confirmation.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 8 else {
-            errorMessage = "Passphrase must be at least eight characters."
+        
+        guard trimmed.allSatisfy({ $0.isNumber }) else {
+            errorMessage = "Passcode must contain only numbers (0-9)."
+            return
+        }
+        guard trimmed.count >= 4 && trimmed.count <= 10 else {
+            errorMessage = "Passcode must be 4-10 digits."
             return
         }
         guard trimmed == confirmationTrimmed else {
-            errorMessage = "Passphrases do not match."
+            errorMessage = "Passcodes do not match."
             return
         }
         errorMessage = nil
@@ -551,15 +617,15 @@ private struct ReauthenticationModalView: View {
     let action: SettingsView.SensitiveSecurityAction
     let biometricCapability: BiometricCapability
     let allowBiometric: Bool
-    let allowPassphrase: Bool
+    let allowPasscode: Bool
     let errorMessage: String?
     let isBiometricInFlight: Bool
     let onCancel: () -> Void
     let onBiometric: () -> Void
-    let onPassphrase: (String) -> Void
+    let onPasscode: (String) -> Void
 
-    @State private var passphrase: String = ""
-    @FocusState private var isPassphraseFocused: Bool
+    @State private var passcode: String = ""
+    @FocusState private var isPasscodeFocused: Bool
 
     var body: some View {
         ZStack {
@@ -594,15 +660,16 @@ private struct ReauthenticationModalView: View {
                     .disabled(isBiometricInFlight)
                 }
 
-                if allowPassphrase {
+                if allowPasscode {
                     VStack(alignment: .leading, spacing: 12) {
-                        SecureField("Passphrase", text: $passphrase)
-                            .focused($isPassphraseFocused)
+                        SecureField("Passcode", text: $passcode)
+                            .focused($isPasscodeFocused)
                             .textContentType(.password)
+                            .keyboardType(.numberPad)
                             .submitLabel(.done)
-                            .onSubmit(submitPassphrase)
+                            .onSubmit(submitPasscode)
 
-                        Button("Confirm with Passphrase", action: submitPassphrase)
+                        Button("Confirm with Passcode", action: submitPasscode)
                             .buttonStyle(.bordered)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -630,9 +697,9 @@ private struct ReauthenticationModalView: View {
             .padding(.horizontal, 32)
         }
         .onAppear {
-            if allowPassphrase {
+            if allowPasscode {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    isPassphraseFocused = true
+                    isPasscodeFocused = true
                 }
             }
         }
@@ -649,37 +716,39 @@ private struct ReauthenticationModalView: View {
         }
     }
 
-    private func submitPassphrase() {
-        guard passphrase.isEmpty == false else { return }
-        onPassphrase(passphrase)
+    private func submitPasscode() {
+        guard passcode.isEmpty == false else { return }
+        onPasscode(passcode)
     }
 }
+
+extension SettingsView {
     @ViewBuilder
     private var securityOverlay: some View {
-        if let modal = activePassphraseModal {
-            PassphraseModalView(
+        if let modal = activePasscodeModal {
+            PasscodeModalView(
                 mode: modal,
-                onComplete: handlePassphraseSet(_:),
-                onCancel: handlePassphraseCancel
+                onComplete: handlePasscodeSet(_:),
+                onCancel: handlePasscodeCancel
             )
         } else if showReauthModal, let action = pendingSensitiveAction {
             ReauthenticationModalView(
                 action: action,
                 biometricCapability: biometricCapability,
                 allowBiometric: reauthMode.requiresBiometrics && biometricCapability != .none,
-                allowPassphrase: hasPassphrase,
+                allowPasscode: hasPassphrase,
                 errorMessage: reauthErrorMessage,
                 isBiometricInFlight: isReauthBiometricInFlight,
                 onCancel: cancelReauthentication,
                 onBiometric: performBiometricReauthentication,
-                onPassphrase: validateReauthPassphrase(_:)
+                onPasscode: validateReauthPasscode(_:)
             )
         }
     }
 
-    private func applyAuthenticationMode(biometric: Bool, passphrase: Bool) {
+    private func applyAuthenticationMode(biometric: Bool, passcode: Bool) {
         let newMode: AuthenticationSettings.Mode
-        switch (biometric, passphrase) {
+        switch (biometric, passcode) {
         case (true, true): newMode = .both
         case (true, false): newMode = .biometricOnly
         case (false, true): newMode = .passphraseOnly
@@ -688,28 +757,95 @@ private struct ReauthenticationModalView: View {
         authStore.update { $0.mode = newMode }
     }
 
-    private func handlePassphraseSet(_ passphrase: String) {
+    private func handlePasscodeSet(_ passcode: String) {
         do {
-            try passphraseManager.setPassphrase(passphrase)
+            try passcodeManager.setPassphrase(passcode)
             hasPassphrase = true
-            if pendingPassphraseIntent == .enable {
-                requirePassphrase = true
-                applyAuthenticationMode(biometric: requireBiometric, passphrase: true)
+            if pendingPasscodeIntent == .enable {
+                requirePasscode = true
+                applyAuthenticationMode(biometric: requireBiometric, passcode: true)
             }
-            pendingPassphraseIntent = nil
-            activePassphraseModal = nil
+            pendingPasscodeIntent = nil
+            activePasscodeModal = nil
         } catch {
-            passphraseErrorMessage = "Unable to store passphrase securely."
+            passcodeErrorMessage = "Unable to store passcode securely."
         }
     }
 
-    private func handlePassphraseCancel() {
-        pendingPassphraseIntent = nil
-        activePassphraseModal = nil
+    private func handlePasscodeCancel() {
+        pendingPasscodeIntent = nil
+        activePasscodeModal = nil
     }
 
     private func eraseAll() async {
         await AppDataReset.eraseAll()
+    }
+    
+    private func performCompleteErase() {
+        isErasing = true
+        Task {
+            // Purge server data
+            await eraseAll()
+            
+            // Clear chat state
+            await MainActor.run {
+                chat.eraseLocalState()
+            }
+            
+            // Remove passcode and biometric
+            PassphraseManager.shared.clear()
+            await MainActor.run {
+                AuthenticationSettingsStore.shared.reset()
+            }
+            
+            // Reset onboarding
+            OnboardingManager.shared.resetOnboarding()
+            
+            // Exit app
+            await MainActor.run {
+                exit(0)
+            }
+        }
+    }
+    
+    private func checkServer(_ host: String) async {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmed.isEmpty else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        guard trimmed.contains(".") || trimmed.contains(":") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        await MainActor.run { serverCheckStatus = .checking }
+        
+        guard let url = URL(string: "https://\(trimmed)/") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5.0
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    await MainActor.run { serverCheckStatus = .online }
+                } else {
+                    await MainActor.run { serverCheckStatus = .offline }
+                }
+            } else {
+                await MainActor.run { serverCheckStatus = .offline }
+            }
+        } catch {
+            await MainActor.run { serverCheckStatus = .offline }
+        }
     }
 
     private func purgeServer(deviceId: String) async {
@@ -746,6 +882,127 @@ private struct ReauthenticationModalView: View {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
         if let items = try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) {
             for url in items { try? fm.removeItem(at: url) }
+        }
+    }
+}
+
+// MARK: - Server Change View
+struct ServerChangeView: View {
+    @Environment(\.dismiss) var dismiss
+    @Binding var editServerHost: String
+    @Binding var serverCheckStatus: SettingsView.ServerCheckStatus
+    @Binding var serverCheckTask: Task<Void, Never>?
+    let onSave: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    TextField("server.example.com", text: $editServerHost)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                        .onChange(of: editServerHost) { oldValue, newValue in
+                            serverCheckTask?.cancel()
+                            
+                            serverCheckTask = Task {
+                                try? await Task.sleep(for: .seconds(1))
+                                if !Task.isCancelled {
+                                    await checkServer(newValue)
+                                }
+                            }
+                        }
+                } header: {
+                    Text("Server Host")
+                } footer: {
+                    if serverCheckStatus != .idle {
+                        HStack(spacing: 6) {
+                            Image(systemName: serverCheckStatus.icon)
+                            Text(serverCheckStatus.text)
+                        }
+                        .foregroundColor(serverCheckStatus.color)
+                        .font(.caption)
+                    }
+                }
+                
+                Section {
+                    Button {
+                        Task {
+                            await checkServer(editServerHost)
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: serverCheckStatus.icon)
+                                .foregroundColor(serverCheckStatus.color)
+                            Text("Check Server")
+                            if serverCheckStatus == .checking {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(serverCheckStatus == .checking)
+                }
+            }
+            .navigationTitle("Change Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                    }
+                }
+            }
+            .onAppear {
+                Task {
+                    await checkServer(editServerHost)
+                }
+            }
+        }
+    }
+    
+    private func checkServer(_ host: String) async {
+        let trimmed = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        guard !trimmed.isEmpty else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        guard trimmed.contains(".") || trimmed.contains(":") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        await MainActor.run { serverCheckStatus = .checking }
+        
+        guard let url = URL(string: "https://\(trimmed)/") else {
+            await MainActor.run { serverCheckStatus = .invalid }
+            return
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 5.0
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+                    await MainActor.run { serverCheckStatus = .online }
+                } else {
+                    await MainActor.run { serverCheckStatus = .offline }
+                }
+            } else {
+                await MainActor.run { serverCheckStatus = .offline }
+            }
+        } catch {
+            await MainActor.run { serverCheckStatus = .offline }
         }
     }
 }

@@ -14,19 +14,15 @@ struct SecuredContentView<Content: View>: View {
     
     var body: some View {
         ZStack {
-            content
-            
-            // Privacy overlay that appears when app goes to background
-            if securityManager.showPrivacyOverlay {
-                PrivacyOverlayView()
-                    .zIndex(999) // Ensure it appears above all other content
-                    .transition(.opacity.animation(.easeInOut(duration: 0.1)))
+            // Only show content when unlocked
+            if !securityManager.isLocked {
+                content
             }
 
+            // App lock screen when authentication is required
             if securityManager.isLocked {
-                AuthenticationLockView(manager: securityManager)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
-                    .zIndex(998)
+                AppLockView(securityManager: securityManager)
+                    .zIndex(999)
             }
         }
     }

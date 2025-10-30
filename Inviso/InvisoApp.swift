@@ -12,21 +12,26 @@ import UserNotifications
 struct InvisoApp: App {
     @StateObject private var chat = ChatManager()
     @StateObject private var pushManager = PushNotificationManager.shared
+    @StateObject private var onboardingManager = OnboardingManager.shared
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
         WindowGroup {
-            SecuredContentView {
-                ContentView()
-                    .environmentObject(chat)
-                    .environmentObject(pushManager)
-                    .onOpenURL { url in
-                        chat.handleIncomingURL(url)
-                    }
-                    .task {
-                        // Check notification authorization status on app launch
-                        await pushManager.checkAuthorizationStatus()
-                    }
+            if onboardingManager.hasCompletedOnboarding {
+                SecuredContentView {
+                    ContentView()
+                        .environmentObject(chat)
+                        .environmentObject(pushManager)
+                        .onOpenURL { url in
+                            chat.handleIncomingURL(url)
+                        }
+                        .task {
+                            // Check notification authorization status on app launch
+                            await pushManager.checkAuthorizationStatus()
+                        }
+                }
+            } else {
+                OnboardingView()
             }
         }
     }

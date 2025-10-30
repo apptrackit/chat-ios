@@ -13,7 +13,7 @@ import LocalAuthentication
 /// Centralised security coordinator that manages privacy overlay and foreground authentication.
 final class AppSecurityManager: ObservableObject {
     @Published var showPrivacyOverlay = false
-    @Published private(set) var isLocked = false
+    @Published private(set) var isLocked: Bool
     @Published private(set) var requiresPassphraseEntry = false
     @Published private(set) var shouldPromptBiometric = false
     @Published private(set) var isAttemptingBiometric = false
@@ -22,6 +22,11 @@ final class AppSecurityManager: ObservableObject {
 
     private let settingsStore = AuthenticationSettingsStore.shared
     private let passphraseManager = PassphraseManager.shared
+    
+    /// Whether biometric authentication is enabled in settings
+    var isBiometricEnabled: Bool {
+        settingsStore.settings.mode.requiresBiometrics
+    }
     private var cancellables = Set<AnyCancellable>()
     private var biometricTask: Task<Void, Never>?
     private var biometricSatisfied = false
@@ -32,12 +37,16 @@ final class AppSecurityManager: ObservableObject {
     private static let unlockReason = "Unlock to access protected chats"
 
     init() {
+        // Start locked if authentication is required
+        let authRequired = AuthenticationSettingsStore.shared.settings.mode != .disabled
+        self.isLocked = authRequired
+        
         biometricCapability = BiometricAuth.shared.capability()
         setupNotificationObservers()
         observeSettingsChanges()
-        DispatchQueue.main.async { [weak self] in
-            self?.evaluateLockIfNeeded()
-        }
+        
+        // Immediately evaluate and update lock state if needed
+        evaluateLockIfNeeded()
     }
 
     deinit {
@@ -46,8 +55,13 @@ final class AppSecurityManager: ObservableObject {
     }
 
     func triggerBiometricIfNeeded() {
-        guard shouldPromptBiometric else { return }
-        biometricAutoAttempted = true
+        guard shouldPromptBiometric || (biometricCapability != .none && !biometricSatisfied) else { return }
+        attemptBiometricUnlock()
+    }
+    
+    func retryBiometric() {
+        // Allow manual retry even if auto-attempt already happened
+        guard biometricCapability != .none && !biometricSatisfied else { return }
         attemptBiometricUnlock()
     }
 
@@ -64,6 +78,16 @@ final class AppSecurityManager: ObservableObject {
         if passphraseManager.validate(passphrase: trimmed) {
             passphraseSatisfied = true
             passphraseError = nil
+            
+            print("🔐 Passphrase validated - attempting to unlock storage...")
+            // Unlock message storage with the validated passphrase
+            do {
+                try MessageStorageManager.shared.unlockWithPassphraseSync(trimmed)
+                print("🔓 Message storage unlocked - isUnlocked: \(MessageStorageManager.shared.isUnlocked)")
+            } catch {
+                print("⚠️ Failed to unlock message storage: \(error)")
+            }
+            
             updateLockState()
         } else {
             passphraseError = "Incorrect passphrase."
@@ -204,7 +228,10 @@ final class AppSecurityManager: ObservableObject {
         }
 
         requiresPassphraseEntry = mode.requiresPassphrase && hasStoredPassphrase && !passphraseSatisfied
-        shouldPromptBiometric = mode.requiresBiometrics && !biometricSatisfied
+        
+        // Only prompt biometric if it hasn't been attempted yet
+        // Once attempted (success or fail), don't keep prompting
+        shouldPromptBiometric = mode.requiresBiometrics && !biometricSatisfied && !biometricAutoAttempted
 
 
         if shouldPromptBiometric {
@@ -237,25 +264,20 @@ final class AppSecurityManager: ObservableObject {
     private func runBiometricFlow() async {
         let primary = await BiometricAuth.shared.authenticateWithBiometrics(reason: Self.unlockReason)
         switch primary {
-        case .success:
-            await MainActor.run { self.finalizeBiometricResult(.success) }
+        case .success(let authenticatedContext):
+            await finalizeBiometricResult(.success(authenticatedContext))
         case .cancelled:
-            await MainActor.run { self.finalizeBiometricResult(.cancelled) }
+            await finalizeBiometricResult(.cancelled)
         case .fallback:
-            let passcodeResult = await BiometricAuth.shared.authenticateAllowingDevicePasscode(
-                reason: Self.unlockReason,
-                fallbackTitle: "Enter Passcode"
-            )
-            await MainActor.run { self.finalizeBiometricResult(passcodeResult) }
+            // User tapped "Enter Passcode" - show app passphrase entry UI
+            await finalizeBiometricResult(.fallback)
         case .failed(let code):
             if code == .biometryLockout {
-                let passcodeResult = await BiometricAuth.shared.authenticateAllowingDevicePasscode(
-                    reason: Self.unlockReason,
-                    fallbackTitle: "Enter Passcode"
-                )
-                await MainActor.run { self.finalizeBiometricResult(passcodeResult, lockedOut: true) }
+                // Biometrics locked - show app passphrase entry UI
+                await finalizeBiometricResult(.failed(code), lockedOut: true)
             } else {
-                await MainActor.run { self.finalizeBiometricResult(.failed(code)) }
+                // Other failures (e.g., not recognized) - show passphrase entry UI
+                await finalizeBiometricResult(.failed(code))
             }
         }
         await MainActor.run {
@@ -265,18 +287,35 @@ final class AppSecurityManager: ObservableObject {
     }
 
     @MainActor
-    private func finalizeBiometricResult(_ result: BiometricAuthResult, lockedOut: Bool = false) {
+    private func finalizeBiometricResult(_ result: BiometricAuthResult, lockedOut: Bool = false) async {
         switch result {
-        case .success:
+        case .success(let authenticatedContext):
             biometricSatisfied = true
             passphraseError = nil
+            
+            print("🔐 Biometric validated - attempting to unlock storage...")
+            // Unlock message storage with biometric - MUST complete before unlock
+            // Pass the authenticated context to avoid double biometric prompt
+            do {
+                try await MessageStorageManager.shared.unlockWithBiometric(authenticatedContext: authenticatedContext)
+                print("🔓 Message storage unlocked with biometric - isUnlocked: \(MessageStorageManager.shared.isUnlocked)")
+            } catch {
+                print("⚠️ Failed to unlock message storage with biometric: \(error)")
+                // Even if storage unlock fails, allow app unlock (storage just won't work)
+            }
         case .fallback:
+            // User tapped "Enter Passcode" button - show passphrase entry UI
+            // Don't mark biometric as satisfied, so passphrase entry will be required
             break
         case .cancelled:
+            // User cancelled - don't mark biometric as satisfied
             break
         case .failed(let code):
             if lockedOut || code == .biometryLockout {
-                passphraseError = "Biometrics locked. Use device passcode to retry."
+                passphraseError = "Biometrics locked. Enter your passcode."
+            } else {
+                // Biometric failed (not recognized) - will fall back to passphrase entry
+                passphraseError = nil
             }
         }
         biometricAutoAttempted = true

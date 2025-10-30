@@ -29,7 +29,11 @@ struct LLMView: View {
                                     .padding(.horizontal)
                             } else {
                                 let showTime = index == 0 || !Calendar.current.isDate(msg.timestamp, equalTo: llm.messages[index - 1].timestamp, toGranularity: .minute)
-                                ChatBubble(message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp), showTime: showTime)
+                                ChatBubble(
+                                    message: MessageItem(id: msg.id, text: msg.text, isFromSelf: msg.isFromSelf, time: msg.timestamp),
+                                    showTime: showTime,
+                                    chatMessage: msg
+                                )
                                     .id(msg.id)
                                     .padding(.horizontal)
                             }

@@ -20,6 +20,24 @@
 		<string>remote-notification</string>
 	</array>
 	
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>We need your location to share it securely in your private chats.</string>
+	
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We need access to your microphone to record and send secure voice messages in your private chats.</string>
+	
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is needed to scan QR codes for joining chat rooms quickly and securely.</string>
+	
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Inviso uses local network to discover and connect directly to nearby devices for peer-to-peer encrypted chats without relying on external servers.</string>
+	
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_inviso._tcp</string>
+		<string>_inviso._udp</string>
+	</array>
+	
 	<key>NSUserNotificationUsageDescription</key>
 	<string>We need to notify you when your chat partner is waiting so you don't miss conversations.</string>
 </dict>

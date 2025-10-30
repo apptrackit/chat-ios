@@ -1,21 +1,21 @@
 import SwiftUI
 
-struct PassphraseSetupView: View {
+struct PasscodeSetupView: View {
     enum Mode {
         case create
         case change
 
         var title: String {
             switch self {
-            case .create: return "Set Passphrase"
-            case .change: return "Change Passphrase"
+            case .create: return "Set Passcode"
+            case .change: return "Change Passcode"
             }
         }
 
         var instruction: String {
             switch self {
-            case .create: return "Choose a passphrase of at least eight characters."
-            case .change: return "Enter your new passphrase."
+            case .create: return "Choose a numeric passcode (4-10 digits)."
+            case .change: return "Enter your new numeric passcode (4-10 digits)."
             }
         }
     }
@@ -25,31 +25,47 @@ struct PassphraseSetupView: View {
     let onCancel: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var passphrase = ""
+    @State private var passcode = ""
     @State private var confirmation = ""
     @State private var errorMessage: String?
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
-        case passphrase
+        case passcode
         case confirmation
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Passphrase"), footer: footerView) {
-                    SecureField("New passphrase", text: $passphrase)
-                        .focused($focusedField, equals: .passphrase)
+                Section(header: Text("Passcode"), footer: footerView) {
+                    SecureField("New passcode", text: $passcode)
+                        .focused($focusedField, equals: .passcode)
                         .textContentType(.newPassword)
+                        .keyboardType(.numberPad)
                         .submitLabel(.next)
                         .onSubmit { focusedField = .confirmation }
+                        .onChange(of: passcode) { oldValue, newValue in
+                            // Filter to numbers only and limit to 10 digits
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue || filtered.count > 10 {
+                                passcode = String(filtered.prefix(10))
+                            }
+                        }
 
-                    SecureField("Confirm passphrase", text: $confirmation)
+                    SecureField("Confirm passcode", text: $confirmation)
                         .focused($focusedField, equals: .confirmation)
                         .textContentType(.newPassword)
+                        .keyboardType(.numberPad)
                         .submitLabel(.done)
                         .onSubmit { attemptSave() }
+                        .onChange(of: confirmation) { oldValue, newValue in
+                            // Filter to numbers only and limit to 10 digits
+                            let filtered = newValue.filter { $0.isNumber }
+                            if filtered != newValue || filtered.count > 10 {
+                                confirmation = String(filtered.prefix(10))
+                            }
+                        }
                 }
             }
             .navigationTitle(mode.title)
@@ -67,14 +83,14 @@ struct PassphraseSetupView: View {
                 }
             }
         }
-        .onAppear { focusedField = .passphrase }
+        .onAppear { focusedField = .passcode }
     }
 
     @ViewBuilder
     private var footerView: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(mode.instruction)
-            Text("Avoid using easily guessable information.")
+            Text("Use only numbers (0-9).")
             if let error = errorMessage {
                 Text(error)
                     .foregroundColor(.red)
@@ -85,20 +101,26 @@ struct PassphraseSetupView: View {
     }
 
     private var isValid: Bool {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
         let match = trimmed == confirmation.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count >= 8 && match
+        let isNumeric = trimmed.allSatisfy { $0.isNumber }
+        return trimmed.count >= 4 && trimmed.count <= 10 && isNumeric && match
     }
 
     private func attemptSave() {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = passcode.trimmingCharacters(in: .whitespacesAndNewlines)
         let confirmationTrimmed = confirmation.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 8 else {
-            errorMessage = "Passphrase must be at least eight characters."
+        
+        guard trimmed.allSatisfy({ $0.isNumber }) else {
+            errorMessage = "Passcode must contain only numbers (0-9)."
+            return
+        }
+        guard trimmed.count >= 4 && trimmed.count <= 10 else {
+            errorMessage = "Passcode must be 4-10 digits."
             return
         }
         guard trimmed == confirmationTrimmed else {
-            errorMessage = "Passphrases do not match."
+            errorMessage = "Passcodes do not match."
             return
         }
         errorMessage = nil
@@ -108,5 +130,5 @@ struct PassphraseSetupView: View {
 }
 
 #Preview {
-    PassphraseSetupView(mode: .create, onComplete: { _ in }, onCancel: {})
+    PasscodeSetupView(mode: .create, onComplete: { _ in }, onCancel: {})
 }
