@@ -59,6 +59,7 @@ class ChatManager: NSObject, ObservableObject {
     // Lifetime proposal tracking
     private var pendingProposedLifetime: MessageLifetime?
     private var lifetimeBeforeProposal: MessageLifetime?
+    private var agreedByBothBeforeProposal: Bool?
 
     // State
     private var clientId: String?
@@ -232,7 +233,7 @@ class ChatManager: NSObject, ObservableObject {
         
         // NOTE: We do NOT delete stored messages on leave.
         // Messages expire based on their individual expiresAt timestamps.
-        // If user sent messages with "30 days" retention, they stay for 30 days
+        // If user sent messages with "30 days" auto-delete, they stay for 30 days
         // even if they later switch to "ephemeral" mode for new messages.
         // The MessageCleanupService will delete expired messages automatically.
         
@@ -242,6 +243,9 @@ class ChatManager: NSObject, ObservableObject {
         isP2PConnected = false
     remotePeerPresent = false
         hadP2POnce = false
+        
+        // Invalidate any pending lifetime proposals (without system message since we're leaving)
+        invalidatePendingProposals(addSystemMessage: false)
         
         // Clean up encryption for this session
         cleanupEncryption()
@@ -549,10 +553,17 @@ class ChatManager: NSObject, ObservableObject {
                 
                 // Store the pending proposal and current lifetime (so we can revert if rejected)
                 if let sessionId = activeSessionId,
-                   let session = sessions.first(where: { $0.id == sessionId }) {
-                    lifetimeBeforeProposal = session.messageLifetime
+                   let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }) {
+                    lifetimeBeforeProposal = sessions[sessionIndex].messageLifetime
+                    agreedByBothBeforeProposal = sessions[sessionIndex].lifetimeAgreedByBoth
                     pendingProposedLifetime = lifetime
-                    print("💾 Saved current lifetime (\(session.messageLifetime.rawValue)) in case of rejection")
+                    
+                    // Update session to show proposed lifetime as pending (orange)
+                    sessions[sessionIndex].messageLifetime = lifetime
+                    sessions[sessionIndex].lifetimeAgreedByBoth = false
+                    persistSessions()
+                    
+                    print("💾 Saved current lifetime (\(lifetimeBeforeProposal?.rawValue ?? "nil"), agreed: \(agreedByBothBeforeProposal ?? false)) and set proposal as pending")
                 }
             }
         } catch {
@@ -614,7 +625,7 @@ class ChatManager: NSObject, ObservableObject {
                     
                     // Add system message
                     messages.append(ChatMessage(
-                        text: "Message retention changed to \(lifetime.displayName)",
+                        text: "Auto-delete changed to \(lifetime.displayName)",
                         timestamp: Date(),
                         isFromSelf: false,
                         isSystem: true
@@ -710,10 +721,11 @@ class ChatManager: NSObject, ObservableObject {
             // Clear pending proposal
             pendingProposedLifetime = nil
             lifetimeBeforeProposal = nil
+            agreedByBothBeforeProposal = nil
             
             // Add system message
             messages.append(ChatMessage(
-                text: "Message retention changed to \(lifetime.displayName)",
+                text: "Auto-delete changed to \(lifetime.displayName)",
                 timestamp: Date(),
                 isFromSelf: false,
                 isSystem: true
@@ -730,25 +742,62 @@ class ChatManager: NSObject, ObservableObject {
            let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }),
            let previousLifetime = lifetimeBeforeProposal {
             
-            // Revert to the lifetime before the proposal
+            // Revert to the lifetime and agreed state before the proposal
             sessions[sessionIndex].messageLifetime = previousLifetime
-            sessions[sessionIndex].lifetimeAgreedByBoth = (previousLifetime == .ephemeral) // Default is agreed
+            sessions[sessionIndex].lifetimeAgreedByBoth = agreedByBothBeforeProposal ?? (previousLifetime == .ephemeral)
             persistSessions()
             
-            print("↩️ Reverted to previous lifetime: \(previousLifetime.rawValue)")
+            print("↩️ Reverted to previous lifetime: \(previousLifetime.rawValue) (agreed: \(agreedByBothBeforeProposal ?? false))")
             
             // Clear pending proposal
             pendingProposedLifetime = nil
             lifetimeBeforeProposal = nil
+            agreedByBothBeforeProposal = nil
             
             // Add system message
             messages.append(ChatMessage(
-                text: "Peer declined retention change",
+                text: "Peer declined auto-delete change",
                 timestamp: Date(),
                 isFromSelf: false,
                 isSystem: true
             ))
         }
+    }
+    
+    /// Cancel/invalidate any pending lifetime proposals (called on disconnect/leave)
+    private func invalidatePendingProposals(addSystemMessage: Bool = false) {
+        // If there's a pending proposal we sent, revert to previous state
+        if pendingProposedLifetime != nil,
+           let sessionId = activeSessionId,
+           let sessionIndex = sessions.firstIndex(where: { $0.id == sessionId }),
+           let previousLifetime = lifetimeBeforeProposal {
+            
+            print("🚫 Invalidating pending proposal due to disconnect/leave")
+            
+            // Revert to the lifetime and agreed state before the proposal
+            sessions[sessionIndex].messageLifetime = previousLifetime
+            sessions[sessionIndex].lifetimeAgreedByBoth = agreedByBothBeforeProposal ?? (previousLifetime == .ephemeral)
+            persistSessions()
+            
+            print("↩️ Reverted to previous lifetime: \(previousLifetime.rawValue) (agreed: \(agreedByBothBeforeProposal ?? false))")
+            
+            if addSystemMessage {
+                messages.append(ChatMessage(
+                    text: "Auto-delete proposal cancelled",
+                    timestamp: Date(),
+                    isFromSelf: false,
+                    isSystem: true
+                ))
+            }
+        }
+        
+        // Clear pending proposal state
+        pendingProposedLifetime = nil
+        lifetimeBeforeProposal = nil
+        agreedByBothBeforeProposal = nil
+        
+        // Notify UI to close any proposal modals
+        NotificationCenter.default.post(name: .lifetimeProposalCancelled, object: nil)
     }
 
     // MARK: - ChatView Lifecycle Management
@@ -2110,6 +2159,10 @@ class ChatManager: NSObject, ObservableObject {
             isEncryptionReady = false
             keyExchangeInProgress = false
             
+            // Invalidate any pending lifetime proposals (both sent and received)
+            // This will also notify UI to close any incoming proposal modals
+            invalidatePendingProposals(addSystemMessage: false)
+            
             self.messages.append(ChatMessage(text: "Client left the room", timestamp: Date(), isFromSelf: false, isSystem: true))
         case "left_room":
             self.isAwaitingLeaveAck = false
@@ -2168,6 +2221,9 @@ extension ChatManager: PeerConnectionManagerDelegate {
             print("🔒 P2P connection lost - wiping encryption keys")
             cleanupEncryption()
             connectionPath = .unknown
+            
+            // Invalidate any pending lifetime proposals
+            invalidatePendingProposals(addSystemMessage: false)
             
             // Save room for auto-rejoin when app returns to foreground
             if !roomId.isEmpty {

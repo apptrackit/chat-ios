@@ -177,7 +177,7 @@ struct ContactDetailView: View {
                     Image(systemName: session.messageLifetime.icon)
                         .foregroundColor(.blue)
                         .frame(width: 24)
-                    Text("Retention Policy")
+                    Text("Auto-Delete")
                     Spacer()
                     VStack(alignment: .trailing) {
                         Text(session.messageLifetime.displayName)

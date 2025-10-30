@@ -2,7 +2,7 @@
 //  MessageLifetimeIndicator.swift
 //  Inviso
 //
-//  Shows current retention policy in ChatView
+//  Shows current auto-delete policy in ChatView
 //
 //  Created by GitHub Copilot on 10/26/25.
 //
@@ -52,29 +52,35 @@ struct MessageLifetimeIndicator: View {
 struct CompactLifetimeIndicator: View {
     let lifetime: MessageLifetime
     let agreedByBoth: Bool
+    var onTap: (() -> Void)? = nil
     
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: lifetime.icon)
-                .font(.caption2)
-            
-            Text(shortLabel)
-                .font(.caption2)
-                .fontWeight(.medium)
+        Button {
+            onTap?()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: lifetime.icon)
+                    .font(.caption2)
+                
+                Text(shortLabel)
+                    .font(.caption2)
+                    .fontWeight(.medium)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                isAgreed
+                    ? Color.green.opacity(0.15)
+                    : Color.orange.opacity(0.15)
+            )
+            .foregroundColor(
+                isAgreed
+                    ? .green
+                    : .orange
+            )
+            .cornerRadius(8)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            isAgreed
-                ? Color.green.opacity(0.15)
-                : Color.orange.opacity(0.15)
-        )
-        .foregroundColor(
-            isAgreed
-                ? .green
-                : .orange
-        )
-        .cornerRadius(8)
+        .buttonStyle(.plain)
     }
     
     // Ephemeral (RAM) is the default, so it's always "agreed" even if not explicitly confirmed

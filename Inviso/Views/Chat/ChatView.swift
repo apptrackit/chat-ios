@@ -109,7 +109,7 @@ struct ChatView: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 2) {
+                VStack(spacing: 4) {
                     Button {
                         showRoomSettings = true
                     } label: {
@@ -124,12 +124,27 @@ struct ChatView: View {
                     }
                     .buttonStyle(.plain)
                     
-                    // Message lifetime indicator (only when connected)
+                    // Auto-delete indicator under room name
                     if chat.isP2PConnected, let session = chat.activeSession {
-                        CompactLifetimeIndicator(
-                            lifetime: session.messageLifetime,
-                            agreedByBoth: session.lifetimeAgreedByBoth
-                        )
+                        Button {
+                            showLifetimeSettings = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: session.messageLifetime.icon)
+                                    .font(.system(size: 10))
+                                Text(session.messageLifetime.compactName)
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(session.lifetimeAgreedByBoth ? .green : .orange)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(session.lifetimeAgreedByBoth ? Color.green.opacity(0.15) : Color.orange.opacity(0.15))
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -140,6 +155,7 @@ struct ChatView: View {
                 }
                 .accessibilityLabel("Back")
             }
+            
             ToolbarItem(placement: .navigationBarTrailing) {
                 // Combined connection and encryption indicator button
                 Button {
@@ -222,8 +238,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $showLifetimeSettings) {
             MessageLifetimeSettingsView(chatManager: chat)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+                .presentationDetents([.height(260)])
         }
         .sheet(isPresented: $showLifetimeProposal) {
             if let proposed = proposedLifetime {
@@ -367,6 +382,7 @@ struct ChatView: View {
     }
     
     private func setupLifetimeProposalObserver() {
+        // Listen for incoming proposals
         NotificationCenter.default.addObserver(
             forName: .lifetimeProposalReceived,
             object: nil,
@@ -377,6 +393,20 @@ struct ChatView: View {
                 proposedLifetime = lifetime
                 proposerName = peerName
                 showLifetimeProposal = true
+            }
+        }
+        
+        // Listen for proposal cancellations (when proposer leaves/disconnects)
+        NotificationCenter.default.addObserver(
+            forName: .lifetimeProposalCancelled,
+            object: nil,
+            queue: .main
+        ) { [self] _ in
+            // Close the proposal modal if it's open
+            if showLifetimeProposal {
+                showLifetimeProposal = false
+                proposedLifetime = nil
+                proposerName = ""
             }
         }
     }
@@ -783,7 +813,7 @@ struct MessageDetailsView: View {
                     
                     if let lifetime = message.lifetime {
                         HStack {
-                            Text("Retention Policy")
+                            Text("Auto-Delete")
                             Spacer()
                             Text(lifetimeDisplayName(lifetime))
                                 .foregroundColor(.secondary)

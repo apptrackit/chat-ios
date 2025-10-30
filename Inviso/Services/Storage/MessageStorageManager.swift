@@ -14,7 +14,7 @@ import CryptoKit
 import Security
 import LocalAuthentication
 
-/// Message retention policy agreed between peers
+/// Message auto-delete policy agreed between peers
 enum MessageLifetime: String, Codable {
     case ephemeral = "ephemeral"           // RAM only - delete on leave
     case oneHour = "1h"

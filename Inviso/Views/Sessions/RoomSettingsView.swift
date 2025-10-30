@@ -27,9 +27,9 @@ struct RoomSettingsView: View {
                 // Room Name Section
                 nameSection
                 
-                // Message Retention Section (only when connected)
+                // Message Auto-Delete Section (only when connected)
                 if chat.isP2PConnected {
-                    retentionSection
+                    autoDeleteSection
                 }
                 
                 // Info Section
@@ -266,9 +266,9 @@ struct RoomSettingsView: View {
         }
     }
     
-    private var retentionSection: some View {
+    private var autoDeleteSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Message Retention")
+            Text("Message Auto-Delete")
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
@@ -315,8 +315,7 @@ struct RoomSettingsView: View {
         }
         .sheet(isPresented: $showLifetimeSettings) {
             MessageLifetimeSettingsView(chatManager: chat)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
+                .presentationDetents([.height(260)])
         }
     }
     

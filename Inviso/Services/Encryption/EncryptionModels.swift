@@ -181,6 +181,7 @@ extension Notification.Name {
     static let lifetimeProposalReceived = Notification.Name("lifetimeProposalReceived")
     static let lifetimeAcceptReceived = Notification.Name("lifetimeAcceptReceived")
     static let lifetimeRejectReceived = Notification.Name("lifetimeRejectReceived")
+    static let lifetimeProposalCancelled = Notification.Name("lifetimeProposalCancelled")
 }
 
 // MARK: - Constants

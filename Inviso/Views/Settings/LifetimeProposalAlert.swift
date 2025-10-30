@@ -23,13 +23,13 @@ struct LifetimeProposalAlert: View {
                 .foregroundColor(.accentColor)
             
             // Title
-            Text("Retention Change Request")
+            Text("Auto-Delete Change Request")
                 .font(.title2)
                 .fontWeight(.bold)
             
             // Message
             VStack(spacing: 8) {
-                Text("\(peerName) wants to change message retention to:")
+                Text("\(peerName) wants to change auto-delete to:")
                     .multilineTextAlignment(.center)
                 
                 Text(proposedLifetime.displayName)

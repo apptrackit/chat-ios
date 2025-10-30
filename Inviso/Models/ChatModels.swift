@@ -22,10 +22,10 @@ struct ChatMessage: Identifiable, Equatable {
     var locationData: LocationData? = nil // Optional location data for location messages
     var voiceData: VoiceData? = nil // Optional voice data for voice messages
     
-    // Message retention metadata
+    // Message auto-delete metadata
     var savedLocally: Bool = false // Whether this message is stored on disk
     var expiresAt: Date? = nil // When this message will be auto-deleted
-    var lifetime: MessageLifetime? = nil // Retention policy for this message
+    var lifetime: MessageLifetime? = nil // Auto-delete policy for this message
     
     var isLocationMessage: Bool {
         locationData != nil
@@ -103,7 +103,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
     // Notification tracking
     var notifications: [SessionNotification] = []
     
-    // Message retention settings (agreed between both peers)
+    // Message auto-delete settings (agreed between both peers)
     var messageLifetime: MessageLifetime = .ephemeral // Default: RAM only
     var lifetimeAgreedAt: Date? // When both peers agreed on current setting
     var lifetimeAgreedByBoth: Bool = false // True when both confirmed
@@ -168,7 +168,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         pinnedOrder = try container.decodeIfPresent(Int.self, forKey: .pinnedOrder)
         // Notification tracking (default to empty array for backward compatibility)
         notifications = try container.decodeIfPresent([SessionNotification].self, forKey: .notifications) ?? []
-        // Message retention (default to ephemeral for backward compatibility)
+        // Message auto-delete (default to ephemeral for backward compatibility)
         messageLifetime = try container.decodeIfPresent(MessageLifetime.self, forKey: .messageLifetime) ?? .ephemeral
         lifetimeAgreedAt = try container.decodeIfPresent(Date.self, forKey: .lifetimeAgreedAt)
         lifetimeAgreedByBoth = try container.decodeIfPresent(Bool.self, forKey: .lifetimeAgreedByBoth) ?? false
