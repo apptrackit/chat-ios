@@ -19,7 +19,7 @@ struct ChatView: View {
     @StateObject private var permissionManager = PermissionManager.shared
 
     var body: some View {
-    ZStack(alignment: .center) {
+        ZStack(alignment: .center) {
             // Messages list (always shown so user can see history)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -186,7 +186,8 @@ struct ChatView: View {
                         
                         // Connection status dot
                         Circle()
-                            .fill(chat.isP2PConnected ? Color.green : Color.yellow)
+                            .fill(!chat.isJoinedToRoom ? Color.blue : 
+                                  chat.isP2PConnected ? Color.green : Color.yellow)
                             .frame(width: 10, height: 10)
                     }
                     .padding(.horizontal, 12)
@@ -195,6 +196,7 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
+                    !chat.isJoinedToRoom ? "Viewing mode - not connected" :
                     chat.isEncryptionReady ? "End-to-end encrypted" :
                     chat.keyExchangeInProgress ? "Establishing encryption" :
                     chat.isP2PConnected ? "Connected, not encrypted" :
@@ -296,69 +298,95 @@ struct ChatView: View {
             Group {
                 let hasText = !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 let canSend = chat.isP2PConnected && chat.isEncryptionReady
-                HStack(spacing: 8) {
-                    if !hasText {
-                        // Voice message button (only when no text)
-                        Button {
-                            if !permissionManager.canUseVoiceMessages {
-                                permissionAlertMessage = "Microphone permission is required to send voice messages. Enable it in Settings > Permissions."
-                                showPermissionAlert = true
-                            } else {
-                                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                                    showVoiceRecorder = true
+                
+                // Show Join button when not joined
+                if !chat.isJoinedToRoom && chat.connectionStatus == .connected {
+                    Button {
+                        chat.manualJoinRoom()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Join Room")
+                                .font(.headline)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.accentColor)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    // Normal input UI when joined
+                    HStack(spacing: 8) {
+                        if !hasText {
+                            // Voice message button (only when no text)
+                            Button {
+                                if !permissionManager.canUseVoiceMessages {
+                                    permissionAlertMessage = "Microphone permission is required to send voice messages. Enable it in Settings > Permissions."
+                                    showPermissionAlert = true
+                                } else {
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                                        showVoiceRecorder = true
+                                    }
                                 }
+                            } label: {
+                                Image(systemName: "waveform")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                                    .frame(width: 20, height: 30)
                             }
-                        } label: {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
-                                .frame(width: 20, height: 30)
+                            .buttonStyle(.glass)
+                            .disabled(!canSend)
+                            .opacity(canSend ? 1 : 0.4)
+                            .transition(.scale.combined(with: .opacity))
+                            
+                            // Location sharing button (only when no text)
+                            Button {
+                                if !permissionManager.canUseLocationSharing {
+                                    permissionAlertMessage = "Location permission is required to share your location. Enable it in Settings > Permissions."
+                                    showPermissionAlert = true
+                                } else {
+                                    showLocationPicker = true
+                                }
+                            } label: {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                                    .frame(width: 20, height: 30)
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(!canSend)
+                            .opacity(canSend ? 1 : 0.4)
+                            .transition(.scale.combined(with: .opacity))
                         }
-                        .buttonStyle(.glass)
-                        .disabled(!canSend)
-                        .opacity(canSend ? 1 : 0.4)
-                        .transition(.scale.combined(with: .opacity))
                         
-                        // Location sharing button (only when no text)
-                        Button {
-                            if !permissionManager.canUseLocationSharing {
-                                permissionAlertMessage = "Location permission is required to share your location. Enable it in Settings > Permissions."
-                                showPermissionAlert = true
-                            } else {
-                                showLocationPicker = true
+                        SearchBarField(
+                            text: $input,
+                            placeholder: canSend ? "Message" : 
+                                        !chat.isJoinedToRoom ? "Join to chat…" :
+                                        chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",
+                            onSubmit: { send() }
+                        )
+                            .frame(height: 44)
+                            .disabled(!canSend)
+                            .opacity(canSend ? 1 : 0.6)
+                        if hasText && canSend {
+                            Button(action: send) {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
+                                    .frame(width: 20, height: 30)
                             }
-                        } label: {
-                            Image(systemName: "location.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
-                                .frame(width: 20, height: 30)
+                            .transition(.scale.combined(with: .opacity))
+                            .buttonStyle(.glass)
                         }
-                        .buttonStyle(.glass)
-                        .disabled(!canSend)
-                        .opacity(canSend ? 1 : 0.4)
-                        .transition(.scale.combined(with: .opacity))
                     }
-                    
-                    SearchBarField(
-                        text: $input,
-                        placeholder: canSend ? "Message" : chat.isP2PConnected ? "Encrypting…" : "Waiting for P2P…",
-                        onSubmit: { send() }
-                    )
-                        .frame(height: 44)
-                        .disabled(!canSend)
-                        .opacity(canSend ? 1 : 0.6)
-                    if hasText && canSend {
-                        Button(action: send) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(Color(red: 0.0, green: 0.35, blue: 1.0))
-                                .frame(width: 20, height: 30)
-                        }
-                        .transition(.scale.combined(with: .opacity))
-                        .buttonStyle(.glass)
-                    }
+                    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: input)
                 }
-                .animation(.spring(response: 0.25, dampingFraction: 0.85), value: input)
             }
             .modifier(GlassContainerModifier())
             .padding(.top, 8)

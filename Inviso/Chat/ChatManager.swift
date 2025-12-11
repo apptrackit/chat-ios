@@ -23,6 +23,7 @@ class ChatManager: NSObject, ObservableObject {
     @Published var isEphemeral: Bool = false // Manual Room mode: don't keep history
     @Published var remotePeerPresent: Bool = false // Tracks whether the remote peer is currently in the room (P2P established at least once and not yet left)
     @Published var isOnline: Bool = false // True only while signaling WebSocket is connected
+    @Published var isJoinedToRoom: Bool = false // True when user has explicitly joined (not just viewing)
     // Sessions (frontend)
     @Published var sessions: [ChatSession] = []
     @Published var activeSessionId: UUID?
@@ -132,23 +133,29 @@ class ChatManager: NSObject, ObservableObject {
     func connect() { signaling.connect() }
 
     func disconnect() {
-        signaling.disconnect()
+        // Notify the signaling server we're leaving so the other peer can reset
+        if !roomId.isEmpty {
+            signaling.send(["type": "leave_room", "roomId": roomId])
+            print("[ChatManager] 🚪 Sending leave notification to signaling server")
+        }
+        
+        // Close P2P connection but keep signaling alive for rejoining
         pcm.close()
-        messages.removeAll()
-        roomId = ""
+        // Don't clear messages - keep them visible in viewing mode
         isP2PConnected = false
-    remotePeerPresent = false
-        connectionStatus = .disconnected
-        clientId = nil
+        remotePeerPresent = false
         pendingJoinRoomId = nil
         isAwaitingLeaveAck = false
-        isChatViewActive = false
         pendingRoomReadyIsInitiator = nil
         serverAssignedIsInitiator = nil
         pendingPeerPublicKey = nil
+        isJoinedToRoom = false // Return to viewing mode
         
         // Clear encryption state
         cleanupEncryption()
+        
+        // Keep roomId, messages, and signaling connection so user can rejoin
+        // Don't disconnect signaling or clear clientId
     }
 
     // Change server host at runtime. Disconnects current signaling and rebuilds client.
@@ -169,10 +176,11 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     func joinRoom(roomId: String) {
-    if connectionStatus != .connected { return } // Block join attempts while offline/disconnected
-    if isEphemeral { messages.removeAll() }
+        // This now only loads the chat view without actually joining the signaling room
+        // User must explicitly tap "Join" to connect
+        if isEphemeral { messages.removeAll() }
         self.roomId = roomId
-        // Note: Don't update activity here - only update when E2EE is established and messages are exchanged
+        self.isJoinedToRoom = false // Start in viewing mode
         
         // Load stored messages if storage is unlocked
         // NOTE: Load messages regardless of current mode because:
@@ -210,16 +218,25 @@ class ChatManager: NSObject, ObservableObject {
         } else {
             print("⚠️ Skipping message load - conditions not met")
         }
+    }
+    
+    /// Actually join the room on the signaling server (called when user taps "Join" button)
+    func manualJoinRoom() {
+        guard connectionStatus == .connected else { return }
+        guard !roomId.isEmpty else { return }
+        guard !isJoinedToRoom else { return } // Already joined
+        
+        isJoinedToRoom = true
         
         // Find the session's ephemeral device ID to send to backend for push notification matching
         let deviceId = sessions.first(where: { $0.roomId == roomId })?.ephemeralDeviceId
         
         if let deviceId = deviceId {
             signaling.send(["type": "join_room", "roomId": roomId, "deviceId": deviceId])
-            print("[ChatManager] 🔌 Joining room with deviceId: \(deviceId.prefix(8))...")
+            print("[ChatManager] 🔌 Manually joining room with deviceId: \(deviceId.prefix(8))...")
         } else {
             signaling.send(["type": "join_room", "roomId": roomId])
-            print("[ChatManager] ⚠️ Joining room without deviceId (not found in sessions)")
+            print("[ChatManager] ⚠️ Manually joining room without deviceId (not found in sessions)")
         }
     }
 
@@ -237,11 +254,11 @@ class ChatManager: NSObject, ObservableObject {
         // even if they later switch to "ephemeral" mode for new messages.
         // The MessageCleanupService will delete expired messages automatically.
         
-    messages.removeAll()
+        messages.removeAll()
         // Stop P2P first to avoid any renegotiation or events during leave.
         pcm.close()
         isP2PConnected = false
-    remotePeerPresent = false
+        remotePeerPresent = false
         hadP2POnce = false
         
         // Invalidate any pending lifetime proposals (without system message since we're leaving)
@@ -252,9 +269,13 @@ class ChatManager: NSObject, ObservableObject {
         
         // Clear any pending room_ready that wasn't processed
         pendingRoomReadyIsInitiator = nil
-        // Send leave to server and clear local room immediately.
-        isAwaitingLeaveAck = true
-        signaling.send(["type": "leave_room"])        
+        // Send leave to server and clear local room immediately (only if we actually joined)
+        let wasJoined = isJoinedToRoom
+        isJoinedToRoom = false // Reset join state
+        if wasJoined {
+            isAwaitingLeaveAck = true
+            signaling.send(["type": "leave_room"])
+        }
         let currentRoom = roomId
         roomId = ""
         // Fallback: gently reconnect WS if no ack after a short delay.
@@ -801,10 +822,10 @@ class ChatManager: NSObject, ObservableObject {
     }
 
     // MARK: - ChatView Lifecycle Management
-    /// Called when ChatView appears. If we have a pending room_ready, process it now.
+    /// Called when ChatView appears. If we have a pending room_ready AND user has joined, process it now.
     func chatViewDidAppear() {
         isChatViewActive = true
-        if let isInitiator = pendingRoomReadyIsInitiator {
+        if isJoinedToRoom, let isInitiator = pendingRoomReadyIsInitiator {
             pendingRoomReadyIsInitiator = nil
             handleRoomReady(isInitiator: isInitiator)
         }
@@ -2111,15 +2132,17 @@ class ChatManager: NSObject, ObservableObject {
             hadP2POnce = false
         case "room_ready":
             let isInitiator = json["isInitiator"] as? Bool ?? false
-            // Only establish P2P connection if ChatView is active
-            if isChatViewActive {
+            // Only establish P2P connection if user has explicitly joined the room
+            if isJoinedToRoom && isChatViewActive {
                 handleRoomReady(isInitiator: isInitiator)
-            } else {
-                // Queue for later processing when ChatView appears
+            } else if isJoinedToRoom {
+                // User has joined but ChatView not active yet - queue for later
                 pendingRoomReadyIsInitiator = isInitiator
             }
+            // If not joined, ignore room_ready completely
         case "webrtc_offer":
-            // Only process WebRTC offer if ChatView is active
+            // Only process WebRTC offer if user has joined and ChatView is active
+            guard isJoinedToRoom else { return }
             guard isChatViewActive else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let offer = RTCSessionDescription(type: .offer, sdp: sdp)
@@ -2129,13 +2152,15 @@ class ChatManager: NSObject, ObservableObject {
                 self.signaling.send(["type": "webrtc_answer", "sdp": answer.sdp])
             }
         case "webrtc_answer":
-            // Only process if we have a peer connection (means we're the initiator who sent offer)
+            // Only process if user has joined and we have a peer connection
+            guard isJoinedToRoom else { return }
             guard pcm.pc != nil else { return }
             guard let sdp = json["sdp"] as? String else { return }
             let answer = RTCSessionDescription(type: .answer, sdp: sdp)
             self.pcm.setRemoteAnswer(answer) { _ in }
         case "ice_candidate":
-            // Only process ICE candidates if we have a peer connection
+            // Only process ICE candidates if user has joined and we have a peer connection
+            guard isJoinedToRoom else { return }
             guard pcm.pc != nil else { return }
             guard let c = json["candidate"] as? [String: Any],
                   let sdp = c["candidate"] as? String,
